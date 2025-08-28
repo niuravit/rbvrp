@@ -249,8 +249,6 @@ def plot_network(_path_arcs_list,_node_trace,_display_cus_dem=True,_cus_dem=None
             arr_annotation_stack+=(path['arrow_annotation'])
         fig.update_layout(annotations=arr_annotation_stack)
         
-    
-    
     if _save_to_file is not None:
         fig.write_image(_save_to_file, format='png')
         print(_save_to_file+" is saved succuessfully!")

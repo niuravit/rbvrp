@@ -9,6 +9,7 @@ import pandas as pd
 import pickle as pk
 import pybnb
 import gurobipy as gp
+from gurobipy import Var
 from copy import deepcopy
 from math import ceil,floor
 from datetime import datetime
@@ -19,7 +20,7 @@ import initialize_path as init_path
 import random_instance as rand_inst
 import utility as util
 import model as md
-
+from typing import Dict, List, Any, Tuple, Optional
 
 
 
@@ -38,13 +39,13 @@ class MinimumFleetSizeWithTimeWindowBnP(pybnb.Problem):
         # Root node rmp
         self.rmp_initializer_model = md.timeWindowModel(_init_route, _initializer,
              _dist_mat,_const_dict, _relax_route=True)
-        self.rmp_initializer_model.buildModel();
+        self.rmp_initializer_model.buildModel()
         self.rmp_initializer_model.model.setParam('OutputFlag',False)
         self.rmp_model = self.rmp_initializer_model.model.copy()
         self.rmp_init_df = deepcopy(_initializer.init_routes_df)
         
         # Network
-        self.label = _initializer.init_routes_df["labels"];
+        self.label = _initializer.init_routes_df["labels"]
         self.arcs = self.rmp_initializer_model.arcs
         self.arcs_drp_org = [a for a in self.arcs if 'O' not in a]
         self.arcs_index = self.rmp_initializer_model.arcs_index
@@ -72,12 +73,14 @@ class MinimumFleetSizeWithTimeWindowBnP(pybnb.Problem):
             ip_obj = temp_m_ip_bound.model.ObjVal
             print("LP/IP:",lp_obj,ip_obj)
             p_vars = temp_m_ip_bound.model.getVars()
-            _route_pats_shortcut = dict( [ (p.varName ,  
-                                       dict( [(self.label[a_idx], 
-                                               temp_m_ip_bound.init_routes_df[p.varName][a_idx])
-                                                for a_idx in self.arcs_index 
-                                                    if temp_m_ip_bound.init_routes_df[p.varName][a_idx]>0] )
-                                                      ) for p in p_vars ] )
+            # Old way
+            # _route_pats_shortcut = dict( [ (p.varName ,  
+            #                            dict( [(self.label[a_idx], 
+            #                                    temp_m_ip_bound.init_routes_df[p.varName][a_idx])
+            #                                     for a_idx in self.arcs_index 
+            #                                         if temp_m_ip_bound.init_routes_df[p.varName][a_idx]>0] )
+            #                                           ) for p in p_vars ] )
+            _route_pats_shortcut = get_route_patterns(p_vars, temp_m_ip_bound.init_routes_df, self.arcs_index)                        
             print("IP SOLUTIONS:",[[p.varName, p.x, _route_pats_shortcut[p.varName]] for p in p_vars if p.x >0])
             # update best node:
             if ip_obj<self.best_node[0]:
@@ -92,6 +95,8 @@ class MinimumFleetSizeWithTimeWindowBnP(pybnb.Problem):
         if (self.loc_bound-np.floor(self.loc_bound))>1e-6:
             new_lb = np.ceil(self.loc_bound)
         else: new_lb = np.floor(self.loc_bound)
+        # try setting new_lb to be loc bound: for debugging
+        new_lb = np.round(self.loc_bound,6)
         print("==Called bound(), Update LOCAL BOUND:",self.loc_bound, "ceil to", new_lb) 
         return new_lb
 
@@ -286,13 +291,6 @@ def SolveMinFleetWithTimeWindowNode(cTCCVRP_mt):
     print("==Branching Condition:", _b_cond_log)
 
     # apply branching to parent's column pool: filter out del_pats
-#     print(_route_pats)
-    
-    # DELETING 
-#     _tWLP_node.init_routes_df.drop(columns=_del_pats,inplace=True)
-#     for v in _tWLP_node.model.getVars():
-#         if v.varName in _del_pats: 
-#             _tWLP_node.model.remove(v)
     # INCIDENT DICT
     necess_link = [bh[0] for bh in _b_cond_log if (bh[1]==1)] # 1-branch
     incident_dict = dict(zip([x for x in range(_n+1)],[0]*(_n+1)))
@@ -310,8 +308,7 @@ def SolveMinFleetWithTimeWindowNode(cTCCVRP_mt):
     print("_inflow_dict",_inflow_dict)
     print("_outflow_dict",_outflow_dict)
     
-    # PENALIZING
-#     _tWLP_node.init_routes_df.drop(columns=_del_pats,inplace=True)
+    # PENALIZING: any route containing any of the del_pats will be penalized
     m_lab_idx = cTCCVRP_mt.label.loc[cTCCVRP_mt.label=='m'].index[0]
     for v in _tWLP_node.model.getVars():
         if v.varName in _del_pats: 
@@ -340,11 +337,16 @@ def SolveMinFleetWithTimeWindowNode(cTCCVRP_mt):
     
     ########Pricing###########
     t1 = time.time()
+    # debugging inject [[('O', 'c_11'), 0], [('O', 'c_1'), 0]] branching condition
+    # _b_cond_log = [[('O', 'c_11'), 0], [('O', 'c_1'), 0]]
     _tWLP_node.runColumnsGeneration(None,_pricing_status=False,
             _check_dominance=_chDom,_dominance_rule=4,_DP_ver="SIMUL_M",
-            _time_limit=_const_dict['dp_time_limit'],_update_m_ub=False,_filtering_mode="BestRwdPerI",
+            _time_limit=_const_dict['dp_time_limit'],_update_m_ub=False,
+            _filtering_mode="TopKRwdPerI",
+            # _filtering_mode="BestRwdPerI",
             _bch_cond = _b_cond_log,_node_count_lab = str(_node_count))
     colGen_te = time.time()-t1
+    # _tWLP_node.shortCuttingColumns(forbidden_arcs = _tWLP_node.forbid_link_dict)
     # update _route_pats & objval
     _tWLP_node.solveRelaxedBoundedModel()
     mrelax_obj = _tWLP_node.relaxedBoundedModel.ObjVal
@@ -356,27 +358,57 @@ def SolveMinFleetWithTimeWindowNode(cTCCVRP_mt):
         print("==THIS IS NODE:",_node_count)
     
     
-    print("LP-ColGen OBJ:",_tWLP_node.relaxedBoundedModel.ObjVal)
+    print("LP-ColGen OBJ:",mrelax_obj)
+    _tWLP_node.relaxedBoundedModel.write(f"./relaxModel-node{_node_count}.lp")
+    _tWLP_node.init_routes_df.to_csv(f"./columns_df-node{_node_count}.csv")
+    print(f"Saving relaxModel-node{_node_count}.lp")
     print("ModelVars, DataFrameVars :", len(p_vars),len(_tWLP_node.init_routes_df.columns)-1)
     
-    _route_pats = dict( [ (p.varName ,   dict( [(cTCCVRP_mt.label[a_idx], _tWLP_node.init_routes_df[p.varName][a_idx])
-                                                    for a_idx in cTCCVRP_mt.arcs_index 
-                                                        if _tWLP_node.init_routes_df[p.varName][a_idx]>0] )
-                              ) for p in p_vars ] )
-#         mrelax_obj = _tWLP_node.relaxedBoundedModel.ObjVal
-#         scc_cols = _tWLP_node.init_routes_df.loc[_tWLP_node.customer_index,:].drop(columns = "labels")
-#         scc_cols['new_index'] = range(1,_n+1)
-#         _route_pats = scc_cols.set_index('new_index').to_dict()
-#         p_vars = _tWLP_node.relaxedBoundedModel.getVars()
+    # Old way
+    # _route_pats = dict( [ (p.varName ,   dict( [(cTCCVRP_mt.label[a_idx], _tWLP_node.init_routes_df[p.varName][a_idx])
+    #                                                 for a_idx in cTCCVRP_mt.arcs_index 
+    #                                                     if _tWLP_node.init_routes_df[p.varName][a_idx]>0] )
+    #                           ) for p in p_vars ] )
+    _route_pats = get_route_patterns(p_vars, _tWLP_node.init_routes_df, cTCCVRP_mt.arcs_index)                        
     print("==Obj-val colgen:", mrelax_obj)
 #     print("==Del Pats:",_del_pats)
     print("==Branching Condition:", _b_cond_log)
-    print([[p.varName, p.x, _route_pats[p.varName]] for p in p_vars if p.x >0])
+    print([[p.varName,i, p.Obj, p.x, _route_pats[p.varName]] for i,p in enumerate(p_vars) if p.x > 0])
     lp_sol = dict([(p.varName,(p.x)) for p in p_vars])
     _node_count+=1
     return mrelax_obj, _route_pats, lp_sol, _tWLP_node.model.copy(), deepcopy(_tWLP_node.init_routes_df) ,_node_count
         
+def get_route_patterns(p_vars: list[Var], init_routes_df: pd.DataFrame, arcs_index: list[int]) -> dict:
+    """
+    Creates a dictionary of route patterns using vectorized pandas operations.
 
+    Args:
+        p_vars: A list of Gurobi variable objects.
+        init_routes_df: The DataFrame containing the initial routes.
+        arcs_index: The indices of the rows that correspond to arcs.
+
+    Returns:
+        A dictionary mapping variable names to their active arc coefficients.
+    """
+    # 1. Filter the DataFrame to include only the columns corresponding to p_vars
+    # and the rows corresponding to arcs. This is a single, fast operation.
+    route_cols = [p.varName for p in p_vars]
+    arc_df = init_routes_df.loc[init_routes_df.index[arcs_index], route_cols]
+    arc_df['label'] = init_routes_df.loc[arcs_index, 'labels'].values
+    arc_df.set_index('label', inplace=True)
+    # 2. Filter out all rows where the value is not positive.
+    # This also leverages a vectorized boolean mask.
+    positive_arcs_df = arc_df[arc_df > 0]
+    
+    # 3. Drop rows and columns with all NaNs that were created by the mask.
+    positive_arcs_df = positive_arcs_df.dropna(how='all', axis=0).dropna(how='all', axis=1)
+
+    # 4. Use a dictionary comprehension to build the final output.
+    # The .to_dict() method converts the filtered Series into a dictionary.
+    route_pats = {col: positive_arcs_df[col].dropna().to_dict() 
+                  for col in positive_arcs_df.columns}
+
+    return route_pats
 
 
         
@@ -718,6 +750,8 @@ def SolveMinAverageTimeSpentNode(cTCCVRP_mt):
     
     
     print("LP-ColGen OBJ:",_minAverageTimeLP_node.relaxedBoundedModel.ObjVal)
+    _minAverageTimeLP_node.relaxedBoundedModel.write(f"./relaxModel-node{_node_count}.lp")
+    print(f"Saving relaxModel-node{_node_count}.lp")
     print("ModelVars, DataFrameVars :", len(p_vars),len(_minAverageTimeLP_node.init_routes_df.columns)-1)
     
     _route_pats = dict( [ (p.varName ,   dict( [(cTCCVRP_mt.label[a_idx], _minAverageTimeLP_node.init_routes_df[p.varName][a_idx])

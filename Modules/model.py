@@ -9,10 +9,13 @@ import pandas as pd
 import time
 import numpy as np
 from gurobipy import *
+# from gurobipy import Column, Constr, Var
 from operator import itemgetter
+from solver.pricing.PrizeCollectingDPwTW import PrizeCollectingDPwTW
 import os
 os.environ['GRB_LICENSE_FILE'] = '/Users/ravitpichayavet/gurobi.lic'
 epsilon = 1e-5
+from typing import Dict, List, Any, Tuple, Optional
 
 
 
@@ -1338,6 +1341,7 @@ class timeWindowModel:
         self.depot_t = _initializer.depot_t
         self.all_depot = _initializer.all_depot
         self.customers = _initializer.customers
+        self.n = len(self.customers)
         self.nodes = _initializer.nodes
         self.arcs = _initializer.arcs
         self.route_cost = []
@@ -1380,6 +1384,8 @@ class timeWindowModel:
             self.cost_matrix[nk] = v/self.truck_speed
         
         self.DPRouteDict=dict()
+        self.forbid_link_dict = dict()
+        self.necess_link_dict = dict()
             
     def buildModel(self):
         self.generateVariables()
@@ -1409,8 +1415,8 @@ class timeWindowModel:
 #         self.route_cost = self.init_routes_df.set_index('labels').apply(lambda col: self.calculateCostOfRoute(col),axis=0)
 #         print('Finish generating cost vector!....Elapsed-time:',time.time()-t1)
     def calculateCostOfRoute(self, route):
-        visiting_nodes = pd.Series(route[self.customer_index][route>=1].index)
-        visiting_arcs = pd.Series(route[self.arcs_index][route>=1].index)
+        visiting_nodes = pd.Series(route.iloc[self.customer_index][route>=1].index)
+        visiting_arcs = pd.Series(route.iloc[self.arcs_index][route>=1].index)
         next_node = ['STR']
         route_cost = 0
         qr = visiting_nodes.apply(lambda x: self.customer_demand[x]).sum()
@@ -1475,7 +1481,7 @@ class timeWindowModel:
         return a[a>0]
 
     def getDuals(self):
-        return self.relaxedModel.getAttr('Pi',self.model.getConstrs())
+        return self.relaxedModel.getAttr('Pi',self.relaxedModel.getConstrs())
     
     ##COLUMNS GENERATION
     def addColumn(self,_col_object,_col_cost,_name):
@@ -1483,14 +1489,23 @@ class timeWindowModel:
         self.model.update()
     
     def generateColumns(self,_filtered_df,_duals, ):
+         # Create a dictionary to hold the new columns
+        new_columns_data = {}
         for index, row in _filtered_df.iterrows():
             _col = row.colDF.loc[row.colDF.index[self.customer_index]].iloc[:,-1].to_list()
             newColumn = Column(_col, self.model.getConstrs())
             _name = row.colDF.columns[-1]
             self.addColumn(newColumn,row.routeCost,_name)
-            self.init_routes_df[_name] = row.colDF.iloc[:,-1]
+            # self.init_routes_df[_name] = row.colDF.iloc[:,-1]
+            column_data = row.colDF.iloc[:,-1]
+            new_columns_data[_name] = column_data
 
-    def shortCuttingColumns(self,_var_keywords = 'DP'):
+        # This is a single, vectorized operation that avoids fragmentation.
+        new_columns_df = pd.DataFrame(new_columns_data)
+        # Concatenate the new columns to the existing DataFrame in one go.
+        self.init_routes_df = pd.concat([self.init_routes_df, new_columns_df], axis=1)
+
+    def shortCuttingColumns(self,_var_keywords = 'DP', forbidden_arcs = None):
         _cols = self.init_routes_df.set_index('labels')
         DP_cols = _cols.loc[:,_cols.columns.str.contains(_var_keywords)].copy()
         count = 0 
@@ -1514,7 +1529,7 @@ class timeWindowModel:
                 lr = self.calculateLr(arc_route)
                 _c_tsp = (lr*qr)/(2*col['m'])
                 _route_coef = np.array(sct_seq+arc_route,dtype=object)
-                sc_col = pd.Series(index = _cols.index,data=0,name=r_name)
+                sc_col = pd.Series(index = _cols.index,data=0.0,name=r_name)
                 sc_col.loc[_route_coef]+=1
                 sc_col.loc['m'] = col['m']
                 sc_col.loc['lr'] = lr
@@ -1523,13 +1538,14 @@ class timeWindowModel:
 #                 print(r_name,'OldCost:',self.model.getVarByName(r_name).Obj ,'SCTCost:',_cost)
                 #Update DF: Use sc_col for updating init_routes_df
                 r_var = self.model.getVarByName(r_name)
-                m_constrs = self.model.getConstrs()
-                r_var.Obj = col['m'] # update new m
-                up_list =[]
-#                 for const_idx in range(len(m_constrs)):
-#                     new_coeff = sc_col.loc["c_%s"%(const_idx+1)]
-#                     self.model.chgCoeff(m_constrs[const_idx],r_var,new_coeff)
-#                     up_list.append(["c_%s"%(const_idx+1),new_coeff])
+                # m_constrs = self.model.getConstrs()
+                # r_var.Obj = col['m'] # update new m
+                # up_list =[]
+                self.update_variable_coefficients(sc_col, r_var, forbidden_arcs)
+                # for const_idx in range(len(m_constrs)):
+                #     new_coeff = sc_col.loc["c_%s"%(const_idx+1)]
+                #     self.model.chgCoeff(m_constrs[const_idx],r_var,new_coeff)
+                #     up_list.append(["c_%s"%(const_idx+1),new_coeff])
 #                 print(sc_col[:20],up_list)
                 self.model.update()
                 self.init_routes_df.loc[:,r_name] = sc_col.values
@@ -1538,13 +1554,115 @@ class timeWindowModel:
         self.shortcutCols = sc_col_count
         self.shortcutColsPc = len(DP_cols.columns)
         self.shortcutColsTe = time.time()-t1
+    
+    def update_variable_coefficients(self, sc_col, r_var: Var, _forbidden_arcs = None):
+        """
+        Updates the coefficients of a variable in the model using a Gurobi Column object.
+
+        Args:
+            sc_col: A pandas Series or similar object containing the new coefficients.
+            r_var: The Gurobi variable whose coefficients you want to change.
+        """
+        # Update the objective coefficient of the existing variable
+        var_obj = 1e10 if self.col_contains_forbidden_arc(sc_col,self.convert_forbidden_links(_forbidden_arcs)) else r_var.obj
+        r_var.obj = var_obj
+
+        # 1. Get the list of all constraints in the model
+        all_constrs = self.model.getConstrs()
+
+        # 2. Prepare the list of tuples for bulk update
+        # The format is (constraint, variable, new_coefficient)
+        updates = []
+        for const_idx,constr in enumerate(all_constrs):
+            new_coeff = sc_col.loc["c_%s"%(const_idx+1)]
+            self.model.chgCoeff(constr,r_var,new_coeff)
+            # up_list.append(["c_%s"%(const_idx+1),new_coeff])
+        
+        # Assuming the constraints are ordered correctly and their names match the Series index
+        # for constr_name, new_coeff in sc_col.items():
+        #     # Find the Gurobi constraint object by its name
+        #     constr = self.model.getConstrByName(constr_name)
+        #     if constr:
+        #         updates.append((constr, r_var, new_coeff))
+        
+        # 3. Perform the bulk coefficient change
+        # This is much faster than repeated model.chgCoeff() calls in a loop.
+        
+        # # 1. Get the list of constraints
+        # m_constrs = self.model.getConstrs()
+
+        # # 2. Extract the new coefficients in the correct order
+        # # Assuming sc_col is indexed by constraint names (e.g., 'c_1', 'c_2')
+        # # new_coeffs = sc_col.to_list()
+        # new_coeffs = sc_col.iloc[self.customer_index].to_list()
+
+        # # # 3. Create a new Column object with the constraints and their new coefficients
+        # # new_column = Column(new_coeffs, m_constrs)
+
+        # # var_obj = 1e10 if self.col_contains_forbidden_arc(sc_col,self.convert_forbidden_links(_forbidden_arcs)) else r_var.obj
+
+        # # # 4. Use the model's addVar method to update the existing variable's column
+        # # # The variable must already exist in the model
+        # # self.model.addVar(obj=var_obj, lb=r_var.lb, ub=r_var.ub, vtype=r_var.vtype,
+        # #                 name=r_var.varName, column=new_column)
+
+    def col_contains_forbidden_arc(self, sc_col,_forbidden_arcs) -> bool:
+        """
+        Checks if the column (route) contains any forbidden arcs.
+
+        Args:
+            sc_col: A pandas Series representing the column data.
+            _forbidden_arcs: A list of forbidden arcs, e.g., [('O', 'c_1'), ('c_2', 'c_3')].
+
+        Returns:
+            True if a forbidden arc is found, otherwise False.
+        """
+        if not _forbidden_arcs:
+            return False
+        
+        # Iterate through the forbidden arcs
+        for arc in _forbidden_arcs:
+            # Check if the arc is present in the column's index.
+            # This assumes your sc_col index contains the arc tuples as labels.
+            if arc in sc_col.index:
+                # Check if the coefficient for that arc is non-zero (i.e., it's used in the route)
+                if sc_col[arc] > 0:
+                    return True
+                    
+        return False
+
+    def convert_forbidden_links(self,forbidden_link_dict: Dict[int, List[int]]) -> List[Tuple[str, str]]:
+        """
+        Converts a forbidden links dictionary to a list of arc tuples.
+        
+        Args:
+            forbidden_link_dict: A dictionary where keys are from-nodes (0 for depot)
+                                and values are a list of to-nodes.
+        
+        Returns:
+            A list of arc tuples, e.g., [('O', 'c_11'), ('O', 'c_1')].
+        """
+        if forbidden_link_dict is None:
+            return None
+        forbidden_arcs = []
+        for from_node, to_nodes in forbidden_link_dict.items():
+            from_label = 'O' if from_node == 0 else f'c_{from_node}'
+            for to_node in to_nodes:
+                to_label = 'O' if to_node == 0 else f'c_{to_node}'
+                forbidden_arcs.append((from_label, to_label))
+        return forbidden_arcs
                         
     def calculateLr(self, route_arcs):
         lr = self.fixed_setup_time+(pd.Series(route_arcs).apply(lambda x:self.distance_matrix[x]).sum()/self.truck_speed)
 #         print(route_arcs,lr)
         return lr
 
-    def runColumnsGeneration(self,_m_collections,_pricing_status=False, _check_dominance=True,_dominance_rule=None,_DP_ver=None, _update_m_ub=False, _time_limit=None,_filtering_mode=None,_heu_add_m=False, _bch_cond=None,_node_count_lab=None):
+    def runColumnsGeneration(self,_m_collections,
+                             _pricing_status=False,
+                               _check_dominance=True,
+                               _dominance_rule=None,
+                               _DP_ver=None,
+                               _update_m_ub=False, _time_limit=None,_filtering_mode=None,_heu_add_m=False, _bch_cond=None,_node_count_lab=None):
         outer_dict = dict(zip(['Duals','Inner','ttTime','ttStates'],[[],[],[],[]]))
         inner_dict = dict(zip(['m','route','reward','#states','time'],[None,None,None,None,None]))
         if _DP_ver not in ['ITER_M','SIMUL_M']:
@@ -1552,10 +1670,10 @@ class timeWindowModel:
         else:
             print('.Running Col. Gen. with DP mode: ', _DP_ver )
             _m_ub_dp = self.constant_dict['max_vehicles_proute_DP']
-            if _m_ub_dp == np.inf:
-                self.solveModel()
-                print('Bound upper bound mprDp with initial IP sol:', self.model.ObjVal)
-                _m_ub_dp = np.ceil(self.model.ObjVal)
+            # if _m_ub_dp == np.inf:
+            #     self.solveModel()
+            #     print('Bound upper bound mprDp with initial IP sol:', self.model.ObjVal)
+            #     _m_ub_dp = np.ceil(self.model.ObjVal)
             if (_DP_ver == "ITER_M"):
                 print("Dominance Checking:",_check_dominance,', rule:',_dominance_rule)
                 self.solveRelaxedModel()
@@ -1676,29 +1794,77 @@ class timeWindowModel:
 #                     if _m_ub_dp > self.relaxedModel.ObjVal: 
 #                         print("Bound max veh per dp by relaxObj:", self.relaxedModel.ObjValub_dp)
 #                         _m_ub_dp = np.ceil(self.relaxedModel.ObjVal)
-                    print("\n DUALS:",self.getDuals(),"mMAX:",_m_ub_dp)
+                    print("\n DUALS:",np.round(self.getDuals(), 4),"mMAX:",_m_ub_dp)
                     _inner_t = time.time()
                     if _bch_cond is None:
-                         S,_st_counter = prizeCollectingDPwTWVer2(
-                                    n,self.cost_matrix,Q,self.getDuals(),s0,
-                                    _veh_cap=self.vehicle_capacity,
-                                    _time_window=self.constant_dict['time_window'],
-                                    _wavg_factor=self.constant_dict['tw_avg_factor'],
-                                    _mLim=_m_ub_dp,_chDom=_check_dominance,
-                                    _stopLim=self.max_nodes_proute_DP,
-                                    _time_limit=_time_limit,_heu_add_m=_heu_add_m,
-                                    _domVer=_dominance_rule)
+                        #  S,_st_counter = prizeCollectingDPwTWVer2(
+                        #             n,self.cost_matrix,Q,self.getDuals(),s0,
+                        #             _veh_cap=self.vehicle_capacity,
+                        #             _time_window=self.constant_dict['time_window'],
+                        #             _wavg_factor=self.constant_dict['tw_avg_factor'],
+                        #             _mLim=_m_ub_dp,_chDom=_check_dominance,
+                        #             _stopLim=self.max_nodes_proute_DP,
+                        #             _time_limit=_time_limit,_heu_add_m=_heu_add_m,
+                        #             _domVer=_dominance_rule)
+                        self.forbid_link_dict, self.necess_link_dict = self.parse_branching_conditions(_bch_cond)
+                        solver = PrizeCollectingDPwTW(
+                            _n=n, 
+                            _C=self.cost_matrix, 
+                            _Q=Q,
+                            _dual=self.getDuals(), 
+                            _s0=s0,
+                            _veh_cap=self.vehicle_capacity,
+                            _time_window=self.constant_dict['time_window'],
+                            _wavg_factor=self.constant_dict['tw_avg_factor'],
+                            _m_lim=_m_ub_dp,
+                            _dom_ver=_dominance_rule,
+                            _ch_dom=_check_dominance,
+                            _time_limit=_time_limit,
+                            _stop_lim=self.constant_dict['max_nodes_proute_DP'],
+                            _heu_add_m=_heu_add_m,
+                            _bch_cond=_bch_cond,
+                            _forbid_link_dict=self.forbid_link_dict,
+                            _necess_link_dict=self.necess_link_dict
+                        )
+                        # Call the solve method on the instance
+                        S,_st_counter = solver.solve()
+                        S = solver.convert_to_legacy_format(S)
                     else:
-                        S,_st_counter = prizeCollectingDPwTWVer3(
-                                    n,self.cost_matrix,Q,self.getDuals(),s0,
-                                    _veh_cap=self.vehicle_capacity,
-                                    _time_window=self.constant_dict['time_window'],
-                                    _wavg_factor=self.constant_dict['tw_avg_factor'],
-                                    _mLim=_m_ub_dp,_chDom=_check_dominance,
-                                    _stopLim=self.max_nodes_proute_DP,
-                                    _time_limit=_time_limit,_heu_add_m=_heu_add_m,
-                                    _domVer=_dominance_rule,
-                                    _bch_cond=_bch_cond)
+                        # S,_st_counter = prizeCollectingDPwTWVer3(
+                        #             n,self.cost_matrix,Q,self.getDuals(),s0,
+                        #             _veh_cap=self.vehicle_capacity,
+                        #             _time_window=self.constant_dict['time_window'],
+                        #             _wavg_factor=self.constant_dict['tw_avg_factor'],
+                        #             _mLim=_m_ub_dp,_chDom=_check_dominance,
+                        #             _stopLim=self.max_nodes_proute_DP,
+                        #             _time_limit=_time_limit,_heu_add_m=_heu_add_m,
+                        #             _domVer=_dominance_rule,
+                        #             _bch_cond=_bch_cond)
+                        # Instantiate the class with all required parameters
+                        self.forbid_link_dict, self.necess_link_dict = self.parse_branching_conditions(_bch_cond)
+                        solver = PrizeCollectingDPwTW(
+                            _n=n, 
+                            _C=self.cost_matrix, 
+                            _Q=Q,
+                            _dual=self.getDuals(), 
+                            _s0=s0,
+                            _veh_cap=self.vehicle_capacity,
+                            _time_window=self.constant_dict['time_window'],
+                            _wavg_factor=self.constant_dict['tw_avg_factor'],
+                            _m_lim=_m_ub_dp,
+                            _dom_ver=_dominance_rule,
+                            _ch_dom=_check_dominance,
+                            _time_limit=_time_limit,
+                            _stop_lim=self.constant_dict['max_nodes_proute_DP'],
+                            _heu_add_m=_heu_add_m,
+                            _bch_cond=_bch_cond,
+                            _forbid_link_dict=self.forbid_link_dict,
+                            _necess_link_dict=self.necess_link_dict
+                        )
+                        # Call the solve method on the instance
+                        S,_st_counter = solver.solve()
+                        S = solver.convert_to_legacy_format(S)
+
                     self.feasibleStatesExplored +=_st_counter[0];
                     print('States explored in {0}-iters:{1}'.format(out_loop_counter,_st_counter))
                     print()
@@ -1727,15 +1893,19 @@ class timeWindowModel:
                             col_coeff = prx_route+arc_route
                             nCol = pd.DataFrame(self.init_routes_df.set_index('labels').index,
                                                 columns=['labels'])
-                            if _node_count_lab is not None: prefix ="BnP%s-"%(_node_count_lab)+ str(idx)+str(out_loop_counter)
+                            if _node_count_lab is not None: prefix = f"BnP{_node_count_lab}-{idx}-{out_loop_counter}"
                             else: prefix = str(idx)+str(out_loop_counter)
-                            name = 'sDP_C%s-%s'%(prefix,bestState[7])
-                            nCol[name] = 0
+                            name = f'sDP_C{prefix}-{bestState[7]}'
+                            nCol[name] = 0.0
                             nCol.loc[nCol.labels=='m',name] = route_cost
                             nCol.loc[nCol.labels=='lr',name] = sum([self.distance_matrix[tup]/self.truck_speed for tup in arc_route])
 #                             print(bestState,'M:',route_cost,'RouteName:',name)
 #                             print('PrxRoute:',prx_route,'ArcRoute:',arc_route)
-                            print('RouteName:',name, 'Route:',P,'RouteCost:',route_cost,'Reward:',reward)
+                            print('RouteName:',name,
+                                  'Route:',P,
+                                #   'col_coeff:',col_coeff,
+                                  'RouteCost/DP_m:',f"{route_cost}/{bestState[4]}",
+                                  'Reward:',np.round(reward,4))
                             self.DPRouteDict[name] = prx_route
                             # nCol
                             for idx in col_coeff:
@@ -1760,6 +1930,9 @@ class timeWindowModel:
                             _innerLog['#states'] = None
                             _innerLog['time'] = None
                             _innerLogList=_innerLogList+[_innerLog]
+                    # shortcutting columns, guarantee that each column cannot visit any node more than once
+                    # self.shortCuttingColumns()
+
                     tt_states = sum([len(l) for l in S])
                     iter_log['cols_gen'] += tt_states 
                     #Resolve relax model
@@ -1784,6 +1957,51 @@ class timeWindowModel:
                 self.colGenTe = time.time()-t1
                 self.colGenCompLog = _outerLogList
                 print('Col.Gen. Completed!...Elapsed-time:',self.colGenTe)
+    
+    def parse_branching_conditions(self, _bch_cond: List[Tuple[Tuple[str, str], int]]):
+        """Parses branching conditions into dictionaries of forbidden and necessary links."""
+        forbid_link_dict = {i: [] for i in range(self.n + 1)}
+        necess_link_dict = {i: [] for i in range(self.n + 1)}
+
+        if _bch_cond is None: 
+            return forbid_link_dict, necess_link_dict
+        
+        forbid_link = [bh[0] for bh in _bch_cond if (bh[1] == 0)]
+        necess_link = [bh[0] for bh in _bch_cond if (bh[1] == 1)]
+        
+        
+        
+        # Helper to parse node labels from strings like 'c_5' or 'O'
+        def parse_node(node_str: str) -> int:
+            if node_str == 'O':
+                return 0
+            return int(node_str.split("_")[-1])
+            
+        for arc in forbid_link:
+            i = parse_node(arc[0]); j = parse_node(arc[1])
+            forbid_link_dict[i].append(j)
+            
+        for arc in necess_link:
+            i = parse_node(arc[0]); j = parse_node(arc[1])
+            necess_link_dict[i].append(j)
+            
+            # Propagate necessary links to forbid others
+            if i == 0: # Necessary link from depot: other links from depot are forbidden
+                for k in range(self.n + 1):
+                    if k != j and k not in forbid_link_dict[i]:
+                        forbid_link_dict[i].append(k)
+            elif j == 0: # Necessary link to depot: other links to depot are forbidden
+                for k in range(self.n + 1):
+                    if k != i and j not in forbid_link_dict[k]:
+                        forbid_link_dict[k].append(j)
+            else: # Necessary link between customers
+                for k in range(self.n + 1):
+                    if k != i and j not in forbid_link_dict[k]:
+                        forbid_link_dict[k].append(j) # No other path to j
+                    if k != j and k not in forbid_link_dict[i]:
+                        forbid_link_dict[i].append(k) # No other path from i
+                        
+        return forbid_link_dict, necess_link_dict
         
     def calculateAverageRemainingSpace(self,_model_vars,):
         vars_value = pd.Series(_model_vars)
@@ -1802,7 +2020,8 @@ class timeWindowModel:
         ref_df = self.init_routes_df.set_index('labels')
         _col = ref_df.loc[:][_route_name]
         _mr = _col['m']
-        node_seq = pd.Series(_col[self.customer_index][_col>=0.7].index)
+        # node_seq = pd.Series(_col[self.customer_index][_col>=0.7].index)
+        node_seq = pd.Series(_col.iloc[self.customer_index][_col>=0.7].index)
         _qr = sum([self.customer_demand[c] for c in node_seq])
         _lr = _col['lr']
         _abs_rem_space = (_mr*self.vehicle_capacity) - (_lr*_qr)
@@ -1911,7 +2130,7 @@ class timeWindowModel:
             # Pick max saving route to be shortcut
 #             shortCutRouteId = max(costSavingRecords, key =costSavingRecords.get)
             shortCutRouteIdList = sorted(costSavingRecords.items(),
-                                         key=operator.itemgetter(1),reverse=True)[:-1]
+                                         key=itemgetter(1),reverse=True)[:-1]
             print(costSavingRecords,shortCutRouteIdList)
 
             # Shortcutting process
@@ -2155,175 +2374,6 @@ def prizeCollectingDPwTWVer3(_n,_C,_Q,_dual,_s0,_veh_cap,_time_window,_wavg_fact
                                         elif _domVer==4:S = checkDominanceTWVer4(nS,S,_mLim)
                                         else: print("ERROR: WRONG DOM. VER."); return;
                                     else: S[j].append(nS)
-                            
-
-
-
-
-
-#                         if (len(necess_link_dict[i])>0): 
-#                             # Goes only necessary link (1-branch)
-#                             S[i][w][9] = True # dominance 1-branch
-#                             S[i][w][6] = True
-#                             reachTo = [x for x in  necess_link_dict[i] if ((x!=i) and (x not in forbid_link_dict[i]))] 
-# #                             print("ReachTo:",reachTo)
-#                             for j in reachTo:
-#                                 _rch_counter+=1
-#                                 _d = S[i][w][1] + _Q[j]
-#                                 _l = S[i][w][2] + _C[(i,j)]
-#                                 _p = S[i][w][3] + 1
-#                                 if (_time_window-(_l)>0): # time feasibility
-#                                     m_ctc = np.ceil((_d*(_l+_C[(j,0)]))/(_veh_cap))
-#                                     m_tw = np.ceil((_l+_C[(j,0)])/(_time_window-_l))
-#                                     m = max(m_ctc,m_tw)
-#                                     _rwd = S[i][w][5] + _dual[j-1] + S[i][w][4] - m # dual's index doesnt have depot
-#                                     if m<=_mLim:
-#                                         nS = [j,_d,_l,_p, m,_rwd,False,i]
-#                                         _counter+=1
-#                                         nS = nS+[_counter]+[True]
-#                                         S[j].append(nS)    
-                                
-#                         else:
-#                             # Avoid forbidden link (0-branch)
-#                             reachTo = [x for x in range(1,_n+1) if ((x!=i) and (x not in forbid_link_dict[i]))] 
-#                             for j in reachTo:
-#                                 _rch_counter+=1
-#                                 _d = S[i][w][1] + _Q[j]
-#                                 _l = S[i][w][2] + _C[(i,j)]
-#                                 _p = S[i][w][3] + 1
-#                                 if (_time_window-(_l)>0): # time feasibility
-#                                     m_ctc = np.ceil((_d*(_l+_C[(j,0)]))/(_veh_cap))
-#                                     m_tw = np.ceil((_l+_C[(j,0)])/(_time_window-_l))
-#                                     m = max(m_ctc,m_tw)
-#                                     _rwd = S[i][w][5] + _dual[j-1] + S[i][w][4] - m # dual's index doesnt have depot
-#                                     if m<=_mLim:
-#                                         nS = [j,_d,_l,_p, m,_rwd,False,i]
-#                                         _counter+=1
-#                                         nS = nS+[_counter]+[False]
-#                                         if _chDom:
-#                                             if _domVer==2:S = checkDominanceTWVer2(nS,S,_mLim)
-#                                             elif _domVer==3:S = checkDominanceTWVer3(nS,S,_mLim,_l_threshold)
-#                                             elif _domVer==4:S = checkDominanceTWVer4(nS,S,_mLim)
-#                                             else: print("ERROR: WRONG DOM. VER."); return;
-#                                         else: S[j].append(nS)
-#                                 S[i][w][6] = True
-                                    
-#                                     next_stop = necess_link_dict[j]
-#                                     if (len(next_stop)>0) and (nS[3] < _stopLim):
-#                                         # Necessary Link (1-branch)
-#                                         print("Force reaching from %s to %s"%(j,necess_link_dict[j]))
-#                                         print("j:",j)
-#                                         print("next_stop:",next_stop)
-#                                         print("SHOW Sj:",S[j])
-#                                         k = necess_link_dict[j][0]
-#                                         print("k:",k)
-#                                         _rch_counter+=1; _d = nS[1] + _Q[k];
-#                                         _l = nS[2] + _C[(j,k)]; _p = nS[3] + 1;
-#                                         if (_p > _stopLim): # exceed stop lim
-#                                             print("Exceed stop lim!")
-#                                             throw_away_flag = True; break;
-#                                         if (_time_window-(_l)>0): # time feasibility
-#                                             m_ctc = np.ceil((_d*(_l+_C[(k,0)]))/(_veh_cap))
-#                                             m_tw = np.ceil((_l+_C[(k,0)])/(_time_window-_l))
-#                                             m = max(m_ctc,m_tw)
-#                                             _rwd = nS[5] + _dual[k-1] + nS[4] - m # dual's index doesnt have depot
-#                                             if m<=_mLim:
-#                                                 nS = [k,_d,_l,_p, m,_rwd,False,j]
-#                                                 _counter+=1
-#                                                 nS = nS+[_counter]
-#                                                 if (len(next_stop)>0) and (nS[3] < _stopLim): nS[6] = True # force link only
-#                                                 if _chDom:
-#                                                     if _domVer==2:S = checkDominanceTWVer2(nS,S,_mLim)
-#                                                     elif _domVer==3:S = checkDominanceTWVer3(nS,S,_mLim,_l_threshold)
-#                                                     elif _domVer==4:S = checkDominanceTWVer4(nS,S,_mLim)
-#                                                     else: print("ERROR: WRONG DOM. VER."); return;
-#                                                 else: S[k].append(nS)
-#                                                 print("SHOW Sk:",S[k])
-#                                             else: 
-#                                                 print("Not demand feasible!")
-#                                                 throw_away_flag = True; break;
-#                                         else:
-#                                             print("Not time feasible!")
-#                                             throw_away_flag = True; break;
-#                                         print(nS)
-#                                         print("==========================")
-                        
-                        
-                        
-                        
-#                                         while len(next_stop)>0:
-#                                             print("Force reaching from %s to %s"%(j,necess_link_dict[j]))
-#                                             print("j:",j)
-#                                             print("next_stop:",next_stop)
-#                                             print("SHOW Sj:",S[j])
-#                                             k = necess_link_dict[j][0]
-#                                             print("k:",k)
-#                                             _rch_counter+=1; _d = nS[1] + _Q[k];
-#                                             _l = nS[2] + _C[(j,k)]; _p = nS[3] + 1;
-#                                             if (_p > _stopLim): # exceed stop lim
-#                                                 print("Exceed stop lim!")
-#                                                 throw_away_flag = True; break;
-#                                             if (_time_window-(_l)>0): # time feasibility
-#                                                 m_ctc = np.ceil((_d*(_l+_C[(k,0)]))/(_veh_cap))
-#                                                 m_tw = np.ceil((_l+_C[(k,0)])/(_time_window-_l))
-#                                                 m = max(m_ctc,m_tw)
-#                                                 _rwd = nS[5] + _dual[k-1] + nS[4] - m # dual's index doesnt have depot
-#                                                 if m<=_mLim:
-#                                                     nS = [k,_d,_l,_p, m,_rwd,False,j]
-#                                                     _counter+=1
-#                                                     nS = nS+[_counter]
-#                                                     # Check next link
-#                                                     j=k
-#                                                     next_stop = necess_link_dict[j]
-#                                                     if (len(next_stop)>0) and (nS[3] < _stopLim): nS[6] = True # force link only
-#                                                     if _chDom:
-#                                                         if _domVer==2:S = checkDominanceTWVer2(nS,S,_mLim)
-#                                                         elif _domVer==3:S = checkDominanceTWVer3(nS,S,_mLim,_l_threshold)
-#                                                         elif _domVer==4:S = checkDominanceTWVer4(nS,S,_mLim)
-#                                                         else: print("ERROR: WRONG DOM. VER."); return;
-#                                                     else: S[k].append(nS)
-#                                                     print("SHOW Sk:",S[k])
-#                                                 else: 
-#                                                     print("Not demand feasible!")
-#                                                     throw_away_flag = True; break;
-#                                             else:
-#                                                 print("Not time feasible!")
-#                                                 throw_away_flag = True; break;
-#                                             # Update looping condition
-                                            
-#                                             print(nS)
-                                            
-#                                             print("j:",j)
-#                                             print("next_stop:",next_stop)
-#                                             print("==========================")
-#                                         print("S[j]:",S[j])
-#                                     print("throw_flag:",throw_away_flag)
-#                                     else:
-#                                         if not throw_away_flag:
-#                                             if _chDom:
-#                                                 if _domVer==2:S = checkDominanceTWVer2(nS,S,_mLim)
-#                                                 elif _domVer==3:S = checkDominanceTWVer3(nS,S,_mLim,_l_threshold)
-#                                                 elif _domVer==4:S = checkDominanceTWVer4(nS,S,_mLim)
-#                                                 else: print("ERROR: WRONG DOM. VER."); return;
-#                                             else: S[j].append(nS)
-#                             S[i][w][6] = True
-                            
-#                             if (_time_window-(_l)>0): # time feasibility
-#                                 m_ctc = np.ceil((_d*(_l+_C[(j,0)]))/(_veh_cap))
-#                                 m_tw = np.ceil((_l+_C[(j,0)])/(_time_window-_l))
-#                                 m = max(m_ctc,m_tw)
-#                                 _rwd = S[i][w][5] + _dual[j-1] + S[i][w][4] - m # dual's index doesnt have depot
-#                                 if m<=_mLim:
-#                                     nS = [j,_d,_l,_p, m,_rwd,False,i]
-#                                     _counter+=1
-#                                     nS = nS+[_counter]+[_ab_n]
-#                                     if _chDom:
-#                                         if _domVer==2:S = checkDominanceTWVer2(nS,S,_mLim)
-#                                         elif _domVer==3:S = checkDominanceTWVer3(nS,S,_mLim,_l_threshold)
-#                                         elif _domVer==4:S = checkDominanceTWVer4(nS,S,_mLim)
-#                                         else: print("ERROR: WRONG DOM. VER."); return;
-#                                     else: S[j].append(nS)
-#                             S[i][w][6] = True
             #Sort S[i]
             _temp = sorted(S[i], key=itemgetter(5),reverse=True)
             S[i] = _temp
@@ -2503,10 +2553,12 @@ def pathReconstructionTWVer2(_S, _Q, _C, _filtering_mode=None, _maxM=None, _bch_
             
     elif _filtering_mode == "BestRwdPerI":
         _loop_cond = [True]*len(_S)
-        _cter_idx = 0 # node idx
+        _cter_idx = 1 # node idx
         _order_idx = 0 # First rank of highest reward
         while (any(_loop_cond)) and (_cter_idx<len(_S)):
 #             print(_loop_cond,_cter_idx,_order_idx)
+            _S[_cter_idx] = sorted(_S[_cter_idx], key=lambda x: (-x[5]))
+            
             _route = [0]
             _route_arcs = []
             throw_away_flag = False
@@ -2533,11 +2585,17 @@ def pathReconstructionTWVer2(_S, _Q, _C, _filtering_mode=None, _maxM=None, _bch_
             _bestSt = lSt
 #             print("Starting new route, i/bestSt: ", lI, _bestSt)
             while lP!=0:
-                f_list = list(filter(lambda x:(x[3]==(lP-1)) and (np.abs(x[1]-(lD-_Q[lI]))<0.00001) and (x[4]<=lM) and ((np.abs(x[2]-(lL-_C[(prevN,lI)]))<0.00001)), _S[prevN]))
+                # this filtering tracing back for exactly matching states
+                f_list = list(filter(lambda x:(x[3]==(lP-1)) and
+                                      (np.abs(x[1]-(lD-_Q[lI]))<0.00001) and
+                                        (x[4]<=lM) and 
+                                        ((np.abs(x[2]-(lL-_C[(prevN,lI)]))<0.00001)),
+                                        _S[prevN]))
 #                 print('f_list:',f_list)
                 if len(f_list)==0:
 #                     _order_idx+=1
-                    throw_away_flag=True;break
+                    throw_away_flag=True;
+                    break
                 else:
                     if len(f_list)>1:
 #                         print("ALERT!:",f_list)
@@ -2552,20 +2610,20 @@ def pathReconstructionTWVer2(_S, _Q, _C, _filtering_mode=None, _maxM=None, _bch_
 #                 print("Route:",_route,throw_away_flag)
                
             # check branching conditions
-            if not(throw_away_flag):
-                for tup in necess_link:
-                    tup = (int(tup[0].split("_")[-1].replace("O","0")),int(tup[1].split("_")[-1].replace("O","0")))
-                    if tup[0]==0: # there is (i,j) in route where i!=0
-                        if (tup not in _route_arcs) and (tup[1] in _route): 
-                            throw_away_flag = True; break
-                    elif tup[1]==0: # there is (i,j) in route where j!=0
-                        if (tup not in _route_arcs) and (tup[0] in _route): 
-                            throw_away_flag = True; break
-                    else:
-                        if (tup not in _route_arcs):
-                            throw_away_flag = True; break
-    #              
-                    if throw_away_flag:  print("Skipped:",_route,"No arc:",tup,"State:",)#_S[_cter_idx][_order_idx])
+    #         if not(throw_away_flag):
+    #             for tup in necess_link:
+    #                 tup = (int(tup[0].split("_")[-1].replace("O","0")),int(tup[1].split("_")[-1].replace("O","0")))
+    #                 if tup[0]==0: # there is (i,j) in route where i!=0
+    #                     if (tup not in _route_arcs) and (tup[1] in _route): 
+    #                         throw_away_flag = True; break
+    #                 elif tup[1]==0: # there is (i,j) in route where j!=0
+    #                     if (tup not in _route_arcs) and (tup[0] in _route): 
+    #                         throw_away_flag = True; break
+    #                 else:
+    #                     if (tup not in _route_arcs):
+    #                         throw_away_flag = True; break
+    # #              
+    #                 if throw_away_flag:  print("Skipped:",_route,"No arc:",tup,"State:",)#_S[_cter_idx][_order_idx])
     #                     if _order_idx < len(_S[_cter_idx])-1:
     #                         _order_idx+=1
     #                     else:
@@ -2607,7 +2665,88 @@ def pathReconstructionTWVer2(_S, _Q, _C, _filtering_mode=None, _maxM=None, _bch_
 #         print([(_route_list[i],_bestSt_list[i][5]) for i in range(len(_route_list))])#,_bestSt_list)
         return _route_list,_bestSt_list
         
-        
+    elif _filtering_mode == "TopKRwdPerI":
+        k = 10
+        _loop_cond = [True]*len(_S)
+        _cter_idx = 1 # node idx
+        _order_idx = 0 # First rank of highest reward
+        while (any(_loop_cond)) and (_cter_idx<len(_S)):
+#             print(_loop_cond,_cter_idx,_order_idx)
+            _S[_cter_idx] = sorted(_S[_cter_idx], key=lambda x: (-x[5]))
+            _route = [0]
+            _route_arcs = []
+            throw_away_flag = False
+            lSt = _S[_cter_idx][_order_idx]
+            if ((lSt[0]==0) or (lSt[7] is None)): 
+                print("No improvement for state last visit at:",lSt)
+                _loop_cond[_cter_idx] = False
+                _cter_idx+=1; _order_idx=0
+                continue
+           
+            if (lSt[0] in skip_ending_n):
+                print("Skip all state ending at:",lSt[0])
+                _loop_cond[_cter_idx] = False
+                _cter_idx+=1; _order_idx=0;
+                continue
+                
+            lI = lSt[0]; lD = lSt[1]; lL = lSt[2]
+            lP = lSt[3]; lM = lSt[4]; prevN = lSt[7]
+            _route = [lI]+_route
+            _route_arcs = [(0,lI),(lI,0)]
+            _bestSt = lSt
+#             print("Starting new route, i/bestSt: ", lI, _bestSt)
+            while lP!=0:
+                # this filtering tracing back for exactly matching states
+                f_list = list(filter(lambda x:(x[3]==(lP-1)) and
+                                      (np.abs(x[1]-(lD-_Q[lI]))<0.00001) and
+                                        (x[4]<=lM) and 
+                                        ((np.abs(x[2]-(lL-_C[(prevN,lI)]))<0.00001)),
+                                        _S[prevN]))
+#                 print('f_list:',f_list)
+                if len(f_list)==0:
+#                     _order_idx+=1
+                    throw_away_flag=True;
+                    break
+                else:
+                    if len(f_list)>1:
+#                         print("ALERT!:",f_list)
+                        _temp = sorted(f_list, key=itemgetter(5),reverse=True)
+                        f_list = _temp[:1]
+                    lSt = f_list[0]; lI = lSt[0]; lD = lSt[1]
+                    lL = lSt[2]; lP = lSt[3]; lM = lSt[4]
+                    prevN = lSt[7]; _route = [lI]+_route
+                    _route_arcs = [(0,lI),(lI,_route_arcs[0][1])]+_route_arcs[1:]
+                   
+            
+            # filtering out 0-branch as DP cannot forbid ending at i
+            if not(throw_away_flag):
+                for tup in forbid_link:
+                    tup = (int(tup[0].split("_")[-1].replace("O","0")),int(tup[1].split("_")[-1].replace("O","0")))
+                    if (tup in _route_arcs): 
+                        print("Skipped:",_route,"Forbidden arc:",tup,"State:",)#_S[_cter_idx][_order_idx])
+                        throw_away_flag = True
+    
+                        break
+
+            if not(throw_away_flag):
+                _route_list.append(_route)
+                _bestSt_list.append(_bestSt)
+                _order_idx+=1
+                if (_order_idx>=k) or (_order_idx>=len(_S[_cter_idx])-1):
+                    _loop_cond[_cter_idx] = False
+                    _cter_idx+=1
+                    _order_idx=0
+                # _order_idx=0
+            else:
+                if _order_idx < len(_S[_cter_idx])-1:
+                    _order_idx+=1
+                else:
+                    _loop_cond[_cter_idx] = False
+                    _cter_idx+=1
+                    _order_idx=0
+        return _route_list,_bestSt_list
+
+
 #         _bestStList = [_S[i][0] for i in range(len(_S))]
 #         for _idx in range(1,len(_bestStList)):
 #             _chk_d = dict(zip(one_b,[[0,0]]*len(one_b)))

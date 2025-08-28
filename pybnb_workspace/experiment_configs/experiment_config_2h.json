@@ -1,0 +1,18 @@
+[   {
+        "dom_rule":3,
+        "truck_capacity":20,
+        "fixed_setup_time":0,
+        "truck_speed":20,
+        "max_vehicles":"Infinity",
+        "max_nodes_proute_DP":"Infinity", 
+        "max_vehicles_proute_DP":"Infinity",
+        "init_max_nodes_proute":3,
+        "dp_mode":"SIMUL_M",
+        "dp_time_limit":60,
+        "time_window":2,
+        "tw_avg_factor":1,
+        "bnp_iteration_limit":1,
+        "bnp_time_limit":7200,
+        "model":"MinimumFleetSizeWithTimeWindowModel"
+    }
+]

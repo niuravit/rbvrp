@@ -6,9 +6,38 @@ import pickle as pk
 from datetime import datetime
 from itertools import combinations,permutations 
 import importlib
+from typing import Dict, Any, Union, List
+import json
 sys.path.insert(0,'/Users/admin/Desktop/EE_Year4_Term2/OR/VRP+d/Combine_variables/Modules')
     
 # Utility function
+def read_json(file_path: str) -> Union[Dict[str, Any], List[Dict[str, Any]]]:
+    """
+    Reads a JSON file, handling both a single object and a list of objects.
+    It also converts string "Infinity" values to np.inf.
+
+    Args:
+        file_path: Path to the JSON file.
+
+    Returns:
+        A dictionary or a list of dictionaries containing the parsed JSON data.
+    """
+    with open(file_path, 'r') as f:
+        data = json.load(f)
+
+    def parse_infinity(item: Union[Dict, List]) -> Union[Dict, List]:
+        """Recursive helper function to parse infinity."""
+        if isinstance(item, dict):
+            return {
+                key: np.inf if isinstance(value, str) and value == "Infinity" else value
+                for key, value in item.items()
+            }
+        elif isinstance(item, list):
+            return [parse_infinity(sub_item) for sub_item in item]
+        else:
+            return item
+
+    return parse_infinity(data)
 
 def ReloadModules():
     modules = ['visualize_sol','random_instance','initialize_path','model','experiment','bnp','utility']

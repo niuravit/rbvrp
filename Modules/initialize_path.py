@@ -300,60 +300,158 @@ class InitialRouteGenerator:
         init_route = self.generateBasicInitialPatterns(init_route_df.shape[1]-1,initRouteDf=init_route_df.set_index('labels'))
         init_route.rename(index=lambda x:'route[%d]'%x,inplace=True)
         return init_route
+
+    # def generateInitDFV4wTimeWindow(self, _row_labels,_constant_dict):
+    #     print("Generate Init cols with time window:",_constant_dict['time_window'])
+    #     TW_factor = _constant_dict['tw_avg_factor']
+    #     TW = _constant_dict['time_window']
+    #     n = len(self.customers)
+    #     p = _constant_dict['init_max_nodes_proute']
+    #     U = [[0]]
+    #     P = []
+    #     init_route_df = pd.DataFrame(data =_row_labels,columns=['labels'])
+    #     counter = 0
+    #     terminate = False
+    #     t1 = time.time()
+    #     while not terminate:
+    #         cS = U.pop(0)
+    #         for j in range(1,n+1):
+    #             if (j not in cS) and (len(cS)-1) < p:
+    #                 nS = cS + [j]
+    #                 U.append(nS)
+    #                 nS_lr = 0
+    #                 coeff = []
+    #                 for idx in range(len(nS)):
+    #                     if idx==0: i='O'
+    #                     else: i = 'c_%s'%(nS[idx])
+    #                     if idx==(len(nS)-1): j = 'O'
+    #                     else: j = 'c_%s'%(nS[idx+1])
+    #                     coeff += [i,(i,j)]
+    #                     nS_lr+=self.distance_matrix[(i,j)]/self.truck_speed
+    #     #                     print(coeff)
+    #                 nS_lr+=self.fixed_setup_time
+    #                 nS_qr = 0
+    #                 for c_i in range(1,len(nS)): nS_qr+=self.customer_demand['c_%s'%(nS[c_i])] 
+    #                 column = init_route_df.labels.isin(coeff).astype(float)
+    #                 column.iloc[0] = nS_lr
+    #                 j = 'c_%s'%(nS[-1])
+    #                 _travel_t = nS_lr-(self.distance_matrix[(j,'O')]/self.truck_speed)
+    #                 veh_min_feas = int(np.ceil(nS_qr*nS_lr/self.truck_capacity))
+    #                 veh_min_tw = int(np.ceil((TW_factor*nS_lr)/(TW-_travel_t)))
+    #                 if (TW-_travel_t)<0: continue
+    #                 else:
+    #                     veh_no = max([veh_min_tw,veh_min_feas])
+    #                     if ((np.log10(counter+1)) % 0.5)==0: 
+    #                         print('progress:',counter)
+    #                     var_name = 'route['+str(counter)+']'
+    #                     column.iloc[1] = veh_no
+    #                     init_route_df[var_name]=column.values
+    #                     counter+=1    
+    #         if len(U)==0: terminate=True
+    #     self.initColsTe = time.time()-t1
+    #     print('Elapsed Time:',self.initColsTe)
+    #     self.init_routes_df = init_route_df
+    #     init_route = self.generateBasicInitialPatterns(init_route_df.shape[1]-1,initRouteDf=init_route_df.set_index('labels'))
+    #     init_route.rename(index=lambda x:'route[%d]'%x,inplace=True)
+    #     return init_route
     
-    
-    def generateInitDFV4wTimeWindow(self, _row_labels,_constant_dict):
-        print("Generate Init cols with time window:",_constant_dict['time_window'])
-        TW_factor = _constant_dict['tw_avg_factor']
-        TW = _constant_dict['time_window']
+    def generateInitDFV4wTimeWindow(self, _row_labels, _constant_dict):
+        """
+        Generates initial feasible routes and returns them as a DataFrame.
+
+        :param _row_labels: List of row labels for the DataFrame.
+        :param _constant_dict: Dictionary of constants from ExperimentConfig.
+        :return: A DataFrame containing the initial routes.
+        """
+        print("Generate Init cols with time window:", _constant_dict['time_window'])
+        
+        tw_factor = _constant_dict['tw_avg_factor']
+        tw = _constant_dict['time_window']
         n = len(self.customers)
         p = _constant_dict['init_max_nodes_proute']
-        U = [[0]]
-        P = []
-        init_route_df = pd.DataFrame(data =_row_labels,columns=['labels'])
-        counter = 0
-        terminate = False
+        
+        route_data = []
+        # Use a more efficient deque for the BFS
+        from collections import deque
+        queue = deque([[0]]) # Use deque for efficient queue operations
+        
         t1 = time.time()
-        while not terminate:
-            cS = U.pop(0)
-            for j in range(1,n+1):
-                if (j not in cS) and (len(cS)-1) < p:
-                    nS = cS + [j]
-                    U.append(nS)
-                    nS_lr = 0
-                    coeff = []
-                    for idx in range(len(nS)):
-                        if idx==0: i='O'
-                        else: i = 'c_%s'%(nS[idx])
-                        if idx==(len(nS)-1): j = 'O'
-                        else: j = 'c_%s'%(nS[idx+1])
-                        coeff += [i,(i,j)]
-                        nS_lr+=self.distance_matrix[(i,j)]/self.truck_speed
-        #                     print(coeff)
-                    nS_lr+=self.fixed_setup_time
-                    nS_qr = 0
-                    for c_i in range(1,len(nS)): nS_qr+=self.customer_demand['c_%s'%(nS[c_i])] 
-                    column = init_route_df.labels.isin(coeff).astype(int)
-                    column.iloc[0] = nS_lr
-                    j = 'c_%s'%(nS[-1])
-                    _travel_t = nS_lr-(self.distance_matrix[(j,'O')]/self.truck_speed)
-                    veh_min_feas = int(np.ceil(nS_qr*nS_lr/self.truck_capacity))
-                    veh_min_tw = int(np.ceil((TW_factor*nS_lr)/(TW-_travel_t)))
-                    if (TW-_travel_t)<0: continue
-                    else:
-                        veh_no = max([veh_min_tw,veh_min_feas])
-                        if ((np.log10(counter)) % 0.5)==0: 
-                            print('progress:',counter)
-                        var_name = 'route['+str(counter)+']'
-                        column.iloc[1] = veh_no
-                        init_route_df[var_name]=column.values
-                        counter+=1    
-            if len(U)==0: terminate=True
-        self.initColsTe = time.time()-t1
-        print('Elapsed Time:',self.initColsTe)
-        self.init_routes_df = init_route_df
+        
+        while queue:
+            current_path = queue.popleft()
+            
+            for j in range(1, n + 1):
+                if (j not in current_path) and (len(current_path) - 1) < p:
+                    new_path = current_path + [j]
+                    queue.append(new_path)
+                    
+                    # Original logic for route length and travel time
+                    travel_time = 0
+                    coefficients = []
+                    
+                    # Iterate through the path to calculate travel time
+                    for idx in range(len(new_path)):
+                        if idx == 0:
+                            i = 'O'
+                        else:
+                            i = f'c_{new_path[idx]}'
+                            
+                        if idx == (len(new_path) - 1):
+                            j = 'O'
+                        else:
+                            j = f'c_{new_path[idx + 1]}'
+                        
+                        coefficients.extend([i, (i, j)])
+                        travel_time += self.distance_matrix[(i, j)] / self.truck_speed
+                    
+                    # The original logic included the full loop. Let's fix it by subtracting the last leg.
+                    last_leg_dist = self.distance_matrix[(f'c_{new_path[-1]}', 'O')]
+                    travel_time_without_return = travel_time - (last_leg_dist / self.truck_speed)
+                    
+                    # The original code's variable `nS_lr` was actually the total time, so we re-add the depot leg.
+                    total_route_time = travel_time # This includes the return to depot
+                    
+                    total_demand = sum(self.customer_demand[f'c_{node}'] for node in new_path[1:])
+                    
+                    # Original logic for `veh_min_feas` and `veh_min_tw`
+                    veh_min_feas = np.ceil(total_demand / _constant_dict['truck_capacity'])
+                    
+                    # Check for time window feasibility based on travel_time_without_return
+                    if (tw - travel_time_without_return) < 0:
+                        continue
+                        
+                    veh_min_tw = np.ceil((tw_factor * (travel_time_without_return+(last_leg_dist / self.truck_speed))) / (tw - travel_time_without_return))
+                    
+                    veh_no = max(veh_min_tw, veh_min_feas)
+
+                    # Now, build the column data for the DataFrame in one go
+                    column_data = {'labels': _row_labels, 'values': [0.0] * len(_row_labels)}
+                    
+                    # `nS_lr` in the original code seems to have been the total travel time + setup time
+                    column_data['values'][0] = total_route_time + self.fixed_setup_time
+                    column_data['values'][1] = veh_no
+                    
+                    for i_idx, i_label in enumerate(coefficients):
+                        try:
+                            # Handle both nodes and arcs
+                            idx = _row_labels.index(i_label)
+                            column_data['values'][idx] = 1.0
+                        except ValueError:
+                            pass
+                    
+                    # Append the series to the list
+                    route_data.append(pd.Series(column_data['values'], index=column_data['labels'], name=f'route[{len(route_data)}]'))
+
+        # Create the DataFrame in a single, efficient operation
+        init_route_df = pd.DataFrame(route_data).T.copy()
+        # init_route_df.insert(0, 'labels', _row_labels)
+        init_route_df = init_route_df.reset_index().rename(columns={'index': 'labels'})
+        self.initColsTe = time.time() - t1
+        print('Elapsed Time:', self.initColsTe)
+        # init_route = init_route_df.set_index('labels')
+        self.init_routes_df = init_route_df.copy()
         init_route = self.generateBasicInitialPatterns(init_route_df.shape[1]-1,initRouteDf=init_route_df.set_index('labels'))
-        init_route.rename(index=lambda x:'route[%d]'%x,inplace=True)
+        init_route.rename(index=lambda x: f'route[{x}]', inplace=True)        
         return init_route
 
 
