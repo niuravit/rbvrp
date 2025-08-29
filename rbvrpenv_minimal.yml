@@ -14,5 +14,5 @@ dependencies:
   - pip:
     - datetime
     - typing-extensions>=4.7
-    - pybnb>=1.4
-    - gurobipy>=10.0
+    - pybnb=0.62
+    - gurobipy>=12.0
