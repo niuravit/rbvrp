@@ -31,6 +31,8 @@ while IFS=, read -r job_name account jqueue mail node_nbr core_per_node_nbr mem_
     if [[ "$job_name" == "" ]]; then
         break
     fi
+# remove new line \r from csv
+vis_config=${vis_config//[ $'\001'-$'\037']}
 # Prepare job parameters
 job_log_id=${job_name}_${account}_runtime${runtime_limit}_${instance_config}_${experiment_config}
 # Calculate days, hours, minutes, and seconds
