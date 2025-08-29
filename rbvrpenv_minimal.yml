@@ -7,8 +7,6 @@ dependencies:
   - numpy>=1.26
   - pandas>=2.0
   - scipy>=1.11
-  - gurobipy>=10.0
-  - pybnb>=1.4
   - networkx>=3.0
   - plotly>=5.13
   - nltk>=3.8
@@ -16,3 +14,5 @@ dependencies:
   - pip:
     - datetime
     - typing-extensions>=4.7
+    - pybnb>=1.4
+    - gurobipy>=10.0
