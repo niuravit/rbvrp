@@ -191,7 +191,7 @@ def plot_network(_path_arcs_list,_node_trace,_display_cus_dem=True,_cus_dem=None
 #         ['tw_avg_factor','lr','demand_waiting_str','avg_waiting_per_pkg','pkgs','utilization']
         
         table_trace2 = go.Table(
-                        columnwidth=[1,5]+col_width,
+                        columnwidth=[1,6]+col_width,
                         columnorder=[i for i in range(len(header_row))],
                         header = dict(height = 30,
                                       values = [['<b>%s</b>'%h] for h in header_row],
