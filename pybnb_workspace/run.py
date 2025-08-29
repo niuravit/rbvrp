@@ -1,4 +1,5 @@
-MODULE_DIR = '/Users/ravitpichayavet/Documents/GaTechIE/GraduateResearch/CTC_CVRP/Modules'
+# MODULE_DIR = '/Users/ravitpichayavet/Documents/GaTechIE/GraduateResearch/CTC_CVRP/Modules'
+MODULE_DIR = '../Modules'
 GUROBI_LICENSE_DIR = '/Users/ravitpichayavet/gurobi.lic'
 MAIN_DIR = '../ComputationalExperiment/'
 
