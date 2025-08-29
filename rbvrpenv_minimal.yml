@@ -1,0 +1,18 @@
+name: rbvrpenv
+channels:
+  - conda-forge
+  - defaults
+dependencies:
+  - python=3.12
+  - numpy>=1.26
+  - pandas>=2.0
+  - scipy>=1.11
+  - gurobipy>=10.0
+  - pybnb>=1.4
+  - networkx>=3.0
+  - plotly>=5.13
+  - nltk>=3.8
+  - pip
+  - pip:
+    - datetime
+    - typing-extensions>=4.7
