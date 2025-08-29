@@ -1,6 +1,7 @@
 # MODULE_DIR = '/Users/ravitpichayavet/Documents/GaTechIE/GraduateResearch/CTC_CVRP/Modules'
 MODULE_DIR = '../Modules'
-GUROBI_LICENSE_DIR = '/Users/ravitpichayavet/gurobi.lic'
+# GUROBI_LICENSE_DIR = '/Users/ravitpichayavet/gurobi.lic'
+# os.environ['GRB_LICENSE_FILE'] = GUROBI_LICENSE_DIR
 MAIN_DIR = '../ComputationalExperiment/'
 
 ARG_COLOR = '#104375'
@@ -22,8 +23,6 @@ import bnp as bnp
 import numpy as np
 from gurobipy import *
 import os
-os.environ['GRB_LICENSE_FILE'] = GUROBI_LICENSE_DIR
-
 
 from itertools import combinations,permutations 
 import pandas as pd

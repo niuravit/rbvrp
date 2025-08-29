@@ -1,7 +1,6 @@
 import sys
 sys.path.insert(0,'/Users/ravitpichayavet/Documents/GaTechIE/GraduateResearch/CTC_CVRP/Modules')
 import os
-os.environ['GRB_LICENSE_FILE'] = '/Users/ravitpichayavet/gurobi.lic'
 import numpy as np
 from itertools import combinations,permutations 
 import random 
