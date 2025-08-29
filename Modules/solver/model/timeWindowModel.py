@@ -14,7 +14,7 @@ from operator import itemgetter
 from solver.pricing.PrizeCollectingDPwTW import PrizeCollectingDPwTW
 from solver.pricing.PrizeCollectingDPwTWNewStorage import PrizeCollectingDPwTWNewStorage
 import os
-os.environ['GRB_LICENSE_FILE'] = '/Users/ravitpichayavet/gurobi.lic'
+# os.environ['GRB_LICENSE_FILE'] = '/Users/ravitpichayavet/gurobi.lic'
 epsilon = 1e-5
 from typing import Dict, List, Any, Tuple, Optional
 from solver.model.RouteCost import RouteCost
