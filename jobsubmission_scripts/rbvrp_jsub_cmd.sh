@@ -51,11 +51,11 @@ echo  "#!/bin/bash
 #SBATCH -olog_files/%j_"${job_log_id}"
 #SBATCH -q"${jqueue}"
 #SBATCH -t${slurmfmt_time_limit}
-cd $WKDIR
+cd $WKDIR/pybnb_workspace
 module load gurobi/11.0.1
 conda activate rbvrpenv
 
-python run.py --instance-config $instance_config --experiment-config $experiment_config --vis-config $vis_config" > ${WKDIR}/${JSCRIPTDIR}/${job_log_id}.sbatch
+python run.py --instance-config $instance_config --experiment-config $experiment_config --vis-config $vis_config" --working-dir $WKDIR > ${WKDIR}/${JSCRIPTDIR}/${job_log_id}.sbatch
 
 # Submit the job
 sbatch ${WKDIR}/${JSCRIPTDIR}/${job_log_id}.sbatch

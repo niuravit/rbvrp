@@ -52,14 +52,27 @@ from ExperimentManager import ExperimentManager
 
 DATA_ROOT = "/Users/ravitpichayavet/Documents/GaTechIE/GraduateResearch/CTC_CVRP/pybnb_workspace"
 
-
 # Step 1: Create the parser
 parser = argparse.ArgumentParser(
     description="A tool to run optimization experiments with configurable settings.",
     formatter_class=argparse.RawTextHelpFormatter
 )
+# Step 2: Define config directory
+parser.add_argument(
+    "--config-dir",
+    type=str,
+    default=".",
+    help="Path to the configuration directory. Defaults to the current directory."
+)
 
-# Step 2: Define all the necessary arguments
+parser.add_argument(
+    "--working-dir",
+    type=str,
+    default=".",
+    help="Path to the working directory. Defaults to the current directory."
+)
+
+# Step 3: Define all the necessary arguments
 parser.add_argument(
     "--instance-config",
     type=str,
@@ -90,20 +103,22 @@ except argparse.ArgumentError as e:
 
 # Step 4: Use the parsed arguments in your script's logic
 print(f"Starting experiment with:")
+print(f"-- Config directory: {args.config_dir}")
+print(f"-- Working directory: {args.working_dir}")
 print(f"-- Instance config: {args.instance_config}")
 print(f"-- Experiment config: {args.experiment_config}")
 print(f"-- Visualization config: {args.vis_config}")
 
 instance_config = util.read_json(
-    file_path=DATA_ROOT+f'/instance_configs/{args.instance_config}')
+    file_path=f'{args.config_dir}/instance_configs/{args.instance_config}')
 experiment_configs = util.read_json(
-    file_path=DATA_ROOT+f'/experiment_configs/{args.experiment_config}')
+    file_path=f'{args.config_dir}/experiment_configs/{args.experiment_config}')
 edge_plot_config = util.read_json(
-    file_path=DATA_ROOT+f'/visualization_configs/{args.vis_config}')
+    file_path=f'{args.config_dir}/visualization_configs/{args.vis_config}')
 exp_manager = ExperimentManager(
     experiment_configs=experiment_configs,
     instance_config_dict=instance_config,
     edge_plot_config=edge_plot_config,
-    working_root_dir="/Users/ravitpichayavet/Documents/GaTechIE/GraduateResearch/CTC_CVRP/ComputationalExperiment")
+    working_root_dir=args.working_dir)
 
 exp_manager.run_experiment()
