@@ -15,18 +15,27 @@ class StateStorage(Generic[T]):
         # Dictionary mapping a node index 'i' to a list of labels of type T
         self.S: Dict[int, List[T]] = {}
 
+    def find_insert_index(self,label)->int:
+        """
+        Finds the index at which the label should be inserted in the sorted list S[label.i].
+        """
+        if label.i not in self.S:
+            self.S[label.i] = []
+            return 0
+        # Find the insertion point using binary search
+        return bisect_left(self.S[label.i], label)
+
     def insert_label(self, label: T) -> None:
         """
-        Inserts a new label into the appropriate position in S[i] while 
+        Inserts a new label into the appropriate position in S[i] while
         maintaining sort order. Assumes the label type T supports the
         comparison operators required by bisect_left (e.g., __lt__).
         """
         if label.i not in self.S:
             self.S[label.i] = []
-        
         # Find the insertion point using binary search
         # This assumes that the label object has an attribute 'i' and supports comparison
-        idx = bisect_left(self.S[label.i], label)
+        idx = self.find_insert_index(label)
         self.S[label.i].insert(idx, label)
 
     def remove_label(self, label: T) -> None:

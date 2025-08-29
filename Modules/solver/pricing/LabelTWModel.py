@@ -17,9 +17,10 @@ class LabelTWModel(Label):
         self.reached_flg = reached_flg
         self.prevN = prevN
         self.counter = counter
-        # self.dominated = dominated # if true, this label is dominated and should not be extended
+        self.dominated = False # if true, this label is dominated and should not be extended
+        self.type_converted = False
         self.dominance_label = dominance_label
-        self.force_extend = []
+        self.force_extend = set()
         
 
     def __repr__(self):
@@ -27,18 +28,37 @@ class LabelTWModel(Label):
                 f"acc_duals={self.acc_duals:.2f}, dominance_label={self.dominance_label}), prevN={self.prevN}),"
                 f"force_extend={self.force_extend}, "
                 f"m={self.m:.2f}, rwd={self.reward:.2f}, stops={self.stops}, "
-                f"reached={self.reached_flg}, counter={self.counter}, ")
+                f"reached={self.reached_flg}, counter={self.counter}, dominated={self.dominated}")
     
     def __lt__(self, other):
         """
-        Implements lexicographical ordering:
+        Implements strict deterministic lexicographical ordering:
         - acc_demand (ascending)
         - acc_length (ascending)
         - acc_duals (descending)
+        - m (ascending)
+        - stops (ascending)
+        - prevN (ascending)
+        - counter (ascending) as final tie-breaker
         """
-        if self.acc_demand != other.acc_demand:
+        # Use small epsilon for floating point comparisons
+        epsilon = 1e-10
+        
+        # Primary criteria with numerical tolerance
+        if abs(self.acc_demand - other.acc_demand) > epsilon:
             return self.acc_demand < other.acc_demand
-        if self.acc_length != other.acc_length:
+        if abs(self.acc_length - other.acc_length) > epsilon:
             return self.acc_length < other.acc_length
-        # For acc_duals, we want descending order, so we reverse the comparison
-        return self.acc_duals > other.acc_duals
+        if abs(self.acc_duals - other.acc_duals) > epsilon:
+            return self.acc_duals > other.acc_duals  # descending order
+            
+        # Secondary criteria
+        if abs(self.m - other.m) > epsilon:
+            return self.m < other.m
+        if self.stops != other.stops:
+            return self.stops < other.stops
+        
+        # Final deterministic tie-breakers
+        if self.prevN != other.prevN:
+            return self.prevN < other.prevN
+        return self.counter < other.counter  # Ultimate tie-breaker using unique counter
