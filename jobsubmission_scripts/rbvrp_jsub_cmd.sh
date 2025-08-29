@@ -11,7 +11,7 @@ WKDIR=$3
 
 # the file with the run information, e.g., instance file name and other parameters
 INPUT="${WKDIR}/${JSCRIPTDIR}/${jListFileName}"
-echo $INPUT
+echo "Reading joblist from ${INPUT} \n"
 
 # operating mode
 MODE="imp"
@@ -26,21 +26,21 @@ while IFS=, read -r job_name account jqueue mail node_nbr core_per_node_nbr mem_
         header=false
         continue
     fi
-    
-    # Skip empty lines
-    if [[ -z "$job_name" ]]; then
-        continue
+    echo $job_name
+    # Break if reaches empty line 
+    if [[ "$job_name" == "" ]]; then
+        break
     fi
 # Prepare job parameters
-job_log_id=${job_name}_${account}_runtime${runtime_limit}_inst${instance_config}_exp${experiment_config}
+job_log_id=${job_name}_${account}_runtime${runtime_limit}_${instance_config}_${experiment_config}
 # Calculate days, hours, minutes, and seconds
 days=$((runtime_limit / 86400))
 hours=$(((runtime_limit % 86400) / 3600))
-minutes=$(( (runtime_limit % 3600) / 60 )+ $buffer_time)
+minutes=$((( (runtime_limit % 3600) / 60 )+ $buffer_time))
 seconds=$((runtime_limit % 60))
 # Format the time limit for SLURM
 slurmfmt_time_limit="${days}-$(printf "%02d" "$hours"):$(printf "%02d" ${minutes}):$(printf "%02d" "$seconds")"
-echo "jname:${job_log_id}, sl_j_tl:${slurmfmt_time_limit}"
+echo "   creating jname: ${job_log_id}, sl_j_tl:${slurmfmt_time_limit}"
 echo  "#!/bin/bash
 #SBATCH -J "${job_log_id}"
 #SBATCH --account="${account}"
@@ -55,13 +55,12 @@ cd $WKDIR/pybnb_workspace
 module load gurobi/11.0.1
 conda activate rbvrpenv
 
-python run.py --instance-config $instance_config --experiment-config $experiment_config --vis-config $vis_config" --working-dir $WKDIR > ${WKDIR}/${JSCRIPTDIR}/${job_log_id}.sbatch
+python run.py --instance-config $instance_config --experiment-config $experiment_config --vis-config $vis_config --working-dir $WKDIR" > ${WKDIR}/${JSCRIPTDIR}/${job_log_id}.sbatch
 
-# Submit the job
-sbatch ${WKDIR}/${JSCRIPTDIR}/${job_log_id}.sbatch
-
-# Optionally remove the temporary script file
-# rm ${WKDIR}/${JSCRIPTDIR}/${job_log_id}.sbatch
+    # Submit the job
+    sbatch ${WKDIR}/${JSCRIPTDIR}/${job_log_id}.sbatch
+    # Optionally remove the temporary script file
+    # rm ${WKDIR}/${JSCRIPTDIR}/${job_log_id}.sbatch
 
 done < "$INPUT"
 
