@@ -19,6 +19,9 @@ MODE="imp"
 # buffer time
 buffer_time=30
 
+# Initialize empty string to store job IDs
+sbatch_submission_ids=""
+
 header=true
 while IFS=, read -r job_name account jqueue mail node_nbr core_per_node_nbr mem_per_core runtime_limit instance_config experiment_config vis_config; do
     # Skip the header line
@@ -60,11 +63,27 @@ conda activate rbvrpenv
 
 python run.py --instance-config $instance_config --experiment-config $experiment_config --vis-config $vis_config --working-dir $WKDIR --gurobi-license PACE"> ${WKDIR}/${JSCRIPTDIR}/${job_log_id}.sbatch
 
-    # Submit the job
-    sbatch ${WKDIR}/${JSCRIPTDIR}/${job_log_id}.sbatch
+    # Submit the job and capture the job ID
+    echo "Submitting job ${job_log_id}..."
+    submit_output=$(sbatch ${WKDIR}/${JSCRIPTDIR}/${job_log_id}.sbatch)
+    sbatch_id=$(echo $submit_output | grep -o '[0-9]*$')
+    echo "Captured sbatch_id: $sbatch_id"
+    sbatch_submission_ids="${sbatch_submission_ids}${sbatch_id},${job_log_id}\n"
+    
+    # Add a 1-second pause between submissions
+    sleep 1
+    echo "Waiting 1 seconds before next submission..."
+
     # Optionally remove the temporary script file
     # rm ${WKDIR}/${JSCRIPTDIR}/${job_log_id}.sbatch
 
 done < "$INPUT"
+
+# After all submissions, save job IDs to a CSV file
+timestamp=$(date +"%Y%m%d-%H%M%S")
+mkdir -p "${WKDIR}/${JSCRIPTDIR}/sbatch_submission_records"
+echo -e "sbatch_id,job_name" > "${WKDIR}/${JSCRIPTDIR}/sbatch_submission_records/submitted_batch_${timestamp}.csv"
+echo -e "$job_ids" >> "${WKDIR}/${JSCRIPTDIR}/sbatch_submission_records/submitted_batch_${timestamp}.csv"
+echo "Job IDs have been saved to: ${WKDIR}/${JSCRIPTDIR}/sbatch_submission_records/submitted_batch_${timestamp}.csv"
 
 
