@@ -1,6 +1,6 @@
 {
-    "no_demand_node": 24,
-    "instance_type": 1,
+    "no_demand_node": 12,
+    "instance_type": 2,
     "distance_metric": "L2norm",
     "instance_id": 5
 }
