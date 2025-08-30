@@ -23,7 +23,7 @@ buffer_time=30
 sbatch_submission_ids=""
 
 header=true
-while IFS=, read -r job_name account jqueue mail node_nbr core_per_node_nbr mem_per_core runtime_limit instance_config experiment_config vis_config; do
+while IFS=, read -r job_name account jqueue mail node_nbr core_per_node_nbr mem_per_core runtime_limit instance_config experiment_config vis_config || [ -n "$job_name" ]; do
     # Skip the header line
     if [ "$header" = true ]; then
         header=false
@@ -83,7 +83,7 @@ done < "$INPUT"
 timestamp=$(date +"%Y%m%d-%H%M%S")
 mkdir -p "${WKDIR}/${JSCRIPTDIR}/sbatch_submission_records"
 echo -e "sbatch_id,job_name" > "${WKDIR}/${JSCRIPTDIR}/sbatch_submission_records/submitted_batch_${timestamp}.csv"
-echo -e "$job_ids" >> "${WKDIR}/${JSCRIPTDIR}/sbatch_submission_records/submitted_batch_${timestamp}.csv"
+echo -e "$sbatch_submission_ids" >> "${WKDIR}/${JSCRIPTDIR}/sbatch_submission_records/submitted_batch_${timestamp}.csv"
 echo "Job IDs have been saved to: ${WKDIR}/${JSCRIPTDIR}/sbatch_submission_records/submitted_batch_${timestamp}.csv"
 
 
