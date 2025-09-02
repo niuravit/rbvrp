@@ -192,8 +192,152 @@ class InitialRouteGenerator:
         init_route = self.generateBasicInitialPatterns(feasibleCols,initRouteDf=x)
         init_route.rename(index=lambda x:'route[%d]'%x,inplace=True)
         return init_route
-    
-    def generateInitDFV2(self, _row_labels,_constant_dict):
+
+    def generateInitialRouteWithFleetSize(self, 
+                                          _row_labels, 
+                                          n,
+                                          tw,
+                                          tw_factor,
+                                          init_max_npr,
+                                          init_max_mpr
+                                          ):
+        """
+        Generates initial feasible routes and returns them as a DataFrame.
+        This is a generalized method handles the following scenarios:
+        - 1. Minimum route fleet size based on demand feasibility and robust time window constraint
+        - 2. Varying fleet size from minimum fleet size to maximum fleet size M: init_max_vehicles_proute.
+        This implementation follows a breadth-first search approach to generate routes
+        and uses vectorized operations where possible for better performance.
+
+        Args:
+            _row_labels: List of row labels for the DataFrame
+            n: Number of customers
+            tw: Time window
+            tw_factor: Time window factor
+            init_max_npr: Initial maximum nodes per route
+            init_max_mpr: Initial maximum vehicles per route
+
+        Returns:
+            DataFrame containing the initial routes
+        """
+        t1 = time.time()
+        print(f"Input parameters: n={n}, tw={tw}, tw_factor={tw_factor}, init_max_npr={init_max_npr}, init_max_mpr={init_max_mpr}")    
+
+         # Initialize DataFrame for routes
+        route_data = []
+        from collections import deque
+        queue = deque([[0]])  # Start with depot
+        counter = 0
+
+        t1 = time.time()
+        
+        # Process routes using BFS
+        while queue:
+            current_path = queue.popleft()
+            # Try extending the current path with each possible customer
+            for j in range(1, n + 1):
+                if j not in current_path and len(current_path) - 1 < init_max_npr:
+                    new_path = current_path + [j]
+                    queue.append(new_path)
+                    
+                    # Calculate route parameters efficiently
+                    travel_time = 0
+                    coefficients = []
+                    
+                    # Build route details
+                    for idx in range(len(new_path)):
+                        i = 'O' if idx == 0 else f'c_{new_path[idx]}'
+                        j = 'O' if idx == len(new_path) - 1 else f'c_{new_path[idx + 1]}'
+                        coefficients.extend([i, (i, j)])
+                        travel_time += self.distance_matrix[(i, j)] / self.truck_speed
+
+                    # Find travel_time_without_return by subtracting last leg
+                    last_leg_dist = self.distance_matrix[(f'c_{new_path[-1]}', 'O')]
+                    travel_time_without_return = travel_time - (last_leg_dist / self.truck_speed)
+                    # Check for time window feasibility based on travel_time_without_return
+                    if (tw - travel_time_without_return) < 0:
+                        continue
+
+                    # Add setup time
+                    total_time = travel_time + self.fixed_setup_time
+                    
+                    # Calculate total demand using vectorized operation
+                    total_demand = sum(self.customer_demand[f'c_{node}'] for node in new_path[1:])
+                    
+                    # Find minimum number of vehicles required
+                    # 1) Demand feasibility
+                    veh_min_feas = int(np.ceil(total_demand * total_time / self.truck_capacity))
+                    # 2) Time window feasibility if tw and tw_factor specified
+                    veh_min_tw = np.ceil((tw_factor * (travel_time_without_return+(last_leg_dist / self.truck_speed))) / (tw - travel_time_without_return)) if tw < np.inf else 0
+                    veh_min_no = max(veh_min_tw, veh_min_feas)
+
+                    if (init_max_mpr < np.inf):
+                        if (veh_min_no <= init_max_mpr):
+                            eff_max_mpr = init_max_mpr
+                        else:
+                            raise ValueError("Infeasible route: exceeds initial max vehicles per route")
+                    else:
+                        # If init_max_mpr is np.inf, we will set eff_max_mpr to minimum fleet size (single value)
+                        eff_max_mpr = veh_min_no
+                    # Create columns for each feasible vehicle number
+                    for veh_no in range(veh_min_no, eff_max_mpr + 1):
+                        if ((counter + 1) % 1000) == 0:
+                            print(f'Progress: {counter + 1} routes generated')
+                        
+                        # Build column data efficiently
+                        column_data = {'labels': _row_labels, 'values': [0.0] * len(_row_labels)}
+                        column_data['values'][0] = total_time  # lr
+                        column_data['values'][1] = veh_no     # m
+                        
+                        # Set coefficients efficiently
+                        for coeff in coefficients:
+                            try:
+                                idx = _row_labels.index(coeff)
+                                column_data['values'][idx] = 1.0
+                            except ValueError:
+                                raise ValueError(f"Label {coeff} not found in row labels")
+                            
+                        route_data.append(pd.Series(column_data['values'], 
+                                                index=column_data['labels'], 
+                                                name=f'route[{counter}]'))
+                        counter += 1
+        if (init_max_mpr < np.inf):
+            print(f"Varying fleet size per route from minimum feasible to {init_max_mpr}")
+        else:
+            print(f"Fixed fleet size per route to minimum feasible.")
+
+        # Create final DataFrame efficiently
+        init_route_df = pd.DataFrame(route_data).T.copy()
+        init_route_df = init_route_df.reset_index().rename(columns={'index': 'labels'})
+        
+        self.initColsTe = time.time() - t1
+        print(f'Generated {counter} routes in {self.initColsTe:.2f} seconds')
+        
+        # Store and process results
+        self.init_routes_df = init_route_df.copy()
+        init_route = self.generateBasicInitialPatterns(init_route_df.shape[1]-1,
+                                                     initRouteDf=init_route_df.set_index('labels'))
+        init_route.rename(index=lambda x: f'route[{x}]', inplace=True)
+        
+        return init_route
+
+
+
+
+    def generateInitDFV2(self, _row_labels, _constant_dict):
+        """
+        Generates initial feasible routes and returns them as a DataFrame.
+        This implementation follows a breadth-first search approach to generate routes
+        and uses vectorized operations where possible for better performance.
+
+        Args:
+            _row_labels: List of row labels for the DataFrame
+            _constant_dict: Dictionary containing constants like truck_capacity, max_nodes_proute, etc.
+
+        Returns:
+            DataFrame containing the initial routes
+        """
+        # Original implementation preserved as reference
         n = len(self.customers)
         init_max_npr = _constant_dict['init_max_nodes_proute']
         init_max_mpr = _constant_dict['init_max_vehicles_proute']
@@ -235,13 +379,16 @@ class InitialRouteGenerator:
                             init_route_df[var_name]=column.values
                             counter+=1
                         
-            if len(U)==0: terminate=True
-        self.initColsTe = time.time()-t1
-        print('Total: %d routes'%(counter-1))
-        print('Elapsed Time:',self.initColsTe)
-        self.init_routes_df = init_route_df
-        init_route = self.generateBasicInitialPatterns(init_route_df.shape[1]-1,initRouteDf=init_route_df.set_index('labels'))
-        init_route.rename(index=lambda x:'route[%d]'%x,inplace=True)
+            if len(U)==0: terminate=True      
+        self.initColsTe = time.time() - t1
+        print(f'Generated {counter} routes in {self.initColsTe:.2f} seconds')
+        
+        # Store and process results
+        self.init_routes_df = init_route_df.copy()
+        init_route = self.generateBasicInitialPatterns(init_route_df.shape[1]-1,
+                                                     initRouteDf=init_route_df.set_index('labels'))
+        init_route.rename(index=lambda x: f'route[{x}]', inplace=True)
+        
         return init_route
     
     def generateInitDFV3wTimeWindow(self, _row_labels,_constant_dict):
@@ -301,63 +448,12 @@ class InitialRouteGenerator:
         init_route.rename(index=lambda x:'route[%d]'%x,inplace=True)
         return init_route
 
-    # def generateInitDFV4wTimeWindow(self, _row_labels,_constant_dict):
-    #     print("Generate Init cols with time window:",_constant_dict['time_window'])
-    #     TW_factor = _constant_dict['tw_avg_factor']
-    #     TW = _constant_dict['time_window']
-    #     n = len(self.customers)
-    #     p = _constant_dict['init_max_nodes_proute']
-    #     U = [[0]]
-    #     P = []
-    #     init_route_df = pd.DataFrame(data =_row_labels,columns=['labels'])
-    #     counter = 0
-    #     terminate = False
-    #     t1 = time.time()
-    #     while not terminate:
-    #         cS = U.pop(0)
-    #         for j in range(1,n+1):
-    #             if (j not in cS) and (len(cS)-1) < p:
-    #                 nS = cS + [j]
-    #                 U.append(nS)
-    #                 nS_lr = 0
-    #                 coeff = []
-    #                 for idx in range(len(nS)):
-    #                     if idx==0: i='O'
-    #                     else: i = 'c_%s'%(nS[idx])
-    #                     if idx==(len(nS)-1): j = 'O'
-    #                     else: j = 'c_%s'%(nS[idx+1])
-    #                     coeff += [i,(i,j)]
-    #                     nS_lr+=self.distance_matrix[(i,j)]/self.truck_speed
-    #     #                     print(coeff)
-    #                 nS_lr+=self.fixed_setup_time
-    #                 nS_qr = 0
-    #                 for c_i in range(1,len(nS)): nS_qr+=self.customer_demand['c_%s'%(nS[c_i])] 
-    #                 column = init_route_df.labels.isin(coeff).astype(float)
-    #                 column.iloc[0] = nS_lr
-    #                 j = 'c_%s'%(nS[-1])
-    #                 _travel_t = nS_lr-(self.distance_matrix[(j,'O')]/self.truck_speed)
-    #                 veh_min_feas = int(np.ceil(nS_qr*nS_lr/self.truck_capacity))
-    #                 veh_min_tw = int(np.ceil((TW_factor*nS_lr)/(TW-_travel_t)))
-    #                 if (TW-_travel_t)<0: continue
-    #                 else:
-    #                     veh_no = max([veh_min_tw,veh_min_feas])
-    #                     if ((np.log10(counter+1)) % 0.5)==0: 
-    #                         print('progress:',counter)
-    #                     var_name = 'route['+str(counter)+']'
-    #                     column.iloc[1] = veh_no
-    #                     init_route_df[var_name]=column.values
-    #                     counter+=1    
-    #         if len(U)==0: terminate=True
-    #     self.initColsTe = time.time()-t1
-    #     print('Elapsed Time:',self.initColsTe)
-    #     self.init_routes_df = init_route_df
-    #     init_route = self.generateBasicInitialPatterns(init_route_df.shape[1]-1,initRouteDf=init_route_df.set_index('labels'))
-    #     init_route.rename(index=lambda x:'route[%d]'%x,inplace=True)
-    #     return init_route
     
     def generateInitDFV4wTimeWindow(self, _row_labels, _constant_dict):
         """
         Generates initial feasible routes and returns them as a DataFrame.
+        This mode assigns minimum fleet size m to a route based on demand feasibility and
+        time window constraint (tw_factor is robustness factor).
 
         :param _row_labels: List of row labels for the DataFrame.
         :param _constant_dict: Dictionary of constants from ExperimentConfig.
@@ -410,11 +506,10 @@ class InitialRouteGenerator:
                     
                     # The original code's variable `nS_lr` was actually the total time, so we re-add the depot leg.
                     total_route_time = travel_time # This includes the return to depot
-                    
                     total_demand = sum(self.customer_demand[f'c_{node}'] for node in new_path[1:])
                     
                     # Original logic for `veh_min_feas` and `veh_min_tw`
-                    veh_min_feas = np.ceil(total_demand / _constant_dict['truck_capacity'])
+                    veh_min_feas = np.ceil(total_demand * total_route_time / _constant_dict['truck_capacity'])
                     
                     # Check for time window feasibility based on travel_time_without_return
                     if (tw - travel_time_without_return) < 0:
@@ -426,7 +521,6 @@ class InitialRouteGenerator:
 
                     # Now, build the column data for the DataFrame in one go
                     column_data = {'labels': _row_labels, 'values': [0.0] * len(_row_labels)}
-                    
                     # `nS_lr` in the original code seems to have been the total travel time + setup time
                     column_data['values'][0] = total_route_time + self.fixed_setup_time
                     column_data['values'][1] = veh_no
@@ -437,8 +531,8 @@ class InitialRouteGenerator:
                             idx = _row_labels.index(i_label)
                             column_data['values'][idx] = 1.0
                         except ValueError:
-                            pass
-                    
+                            raise ValueError(f"Label {i_label} not found in row labels")
+
                     # Append the series to the list
                     route_data.append(pd.Series(column_data['values'], index=column_data['labels'], name=f'route[{len(route_data)}]'))
 
@@ -454,11 +548,115 @@ class InitialRouteGenerator:
         init_route.rename(index=lambda x: f'route[{x}]', inplace=True)        
         return init_route
 
+    def generateInitDFV5wTimeWindowAndMaxFleetSize(self, _row_labels, _constant_dict):
+        """
+        Generates initial feasible routes and returns them as a DataFrame.
+        This mode assigns fleet size from minimum fleet size based on demand feasibility 
+        and robust time window constraint to maximum fleet size M: init_max_vehicles_proute.
+        - M can be calculated from solving Phase I model.
 
+        Args:
+            _row_labels: List of row labels for the DataFrame
+            _constant_dict: Dictionary containing constants like truck_capacity, max_nodes_proute, etc.
 
+        Returns:
+            DataFrame containing the initial routes
+        """
+        
+        print("Generating initial routes with time ...")
+        t1 = time.time()
+        
+        n = len(self.customers)
+        tw = _constant_dict['time_window']
+        tw_factor = _constant_dict['tw_avg_factor']
+        init_max_npr = _constant_dict['init_max_nodes_proute']
+        init_max_mpr = _constant_dict['init_max_vehicles_proute']
+        
+        # Initialize DataFrame for routes
+        route_data = []
+        from collections import deque
+        queue = deque([[0]])  # Start with depot
+        counter = 0
 
+        t1 = time.time()
+        
+        # Process routes using BFS
+        while queue:
+            current_path = queue.popleft()
+            
+            # Try extending the current path with each possible customer
+            for j in range(1, n + 1):
+                if j not in current_path and len(current_path) - 1 < init_max_npr:
+                    new_path = current_path + [j]
+                    queue.append(new_path)
+                    
+                    # Calculate route parameters efficiently
+                    travel_time = 0
+                    coefficients = []
+                    
+                    # Build route details
+                    for idx in range(len(new_path)):
+                        i = 'O' if idx == 0 else f'c_{new_path[idx]}'
+                        j = 'O' if idx == len(new_path) - 1 else f'c_{new_path[idx + 1]}'
+                        coefficients.extend([i, (i, j)])
+                        travel_time += self.distance_matrix[(i, j)] / self.truck_speed
+                    
+                    # The original logic included the full loop. Let's fix it by subtracting the last leg.
+                    last_leg_dist = self.distance_matrix[(f'c_{new_path[-1]}', 'O')]
+                    travel_time_without_return = travel_time - (last_leg_dist / self.truck_speed)
+                    # Check for time window feasibility based on travel_time_without_return
+                    if (tw - travel_time_without_return) < 0:
+                        continue
 
+                    # Add setup time
+                    total_time = travel_time + self.fixed_setup_time
+                    
+                    # Calculate total demand using vectorized operation
+                    total_demand = sum(self.customer_demand[f'c_{node}'] for node in new_path[1:])
+                    
+                    # Original logic for `veh_min_feas` and `veh_min_tw`
+                    veh_min_feas = int(np.ceil(total_demand * total_time / self.truck_capacity))
+                    veh_min_tw = np.ceil((tw_factor * (travel_time_without_return+(last_leg_dist / self.truck_speed))) / (tw - travel_time_without_return))
+                    veh_min_no = max(veh_min_tw, veh_min_feas)
 
+                    if veh_min_no <= init_max_mpr:
+                        # Create columns for each feasible vehicle number
+                        for veh_no in range(veh_min_no, init_max_mpr + 1):
+                            if ((counter + 1) % 1000) == 0:
+                                print(f'Progress: {counter + 1} routes generated')
+                            
+                            # Build column data efficiently
+                            column_data = {'labels': _row_labels, 'values': [0.0] * len(_row_labels)}
+                            column_data['values'][0] = total_time  # lr
+                            column_data['values'][1] = veh_no     # m
+                            
+                            # Set coefficients efficiently
+                            for coeff in coefficients:
+                                try:
+                                    idx = _row_labels.index(coeff)
+                                    column_data['values'][idx] = 1.0
+                                except ValueError:
+                                    raise ValueError(f"Label {coeff} not found in row labels")
+                                
+                            route_data.append(pd.Series(column_data['values'], 
+                                                      index=column_data['labels'], 
+                                                      name=f'route[{counter}]'))
+                            counter += 1
+        
+        # Create final DataFrame efficiently
+        init_route_df = pd.DataFrame(route_data).T.copy()
+        init_route_df = init_route_df.reset_index().rename(columns={'index': 'labels'})
+        
+        self.initColsTe = time.time() - t1
+        print(f'Generated {counter} routes in {self.initColsTe:.2f} seconds')
+        
+        # Store and process results
+        self.init_routes_df = init_route_df.copy()
+        init_route = self.generateBasicInitialPatterns(init_route_df.shape[1]-1,
+                                                     initRouteDf=init_route_df.set_index('labels'))
+        init_route.rename(index=lambda x: f'route[{x}]', inplace=True)
+        
+        return init_route
 
 
 
