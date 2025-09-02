@@ -58,9 +58,21 @@ echo  "#!/bin/bash
 #SBATCH -t${slurmfmt_time_limit}
 cd $WKDIR/pybnb_workspace
 module load gurobi/11.0.1
+
+# Initialize conda properly
 conda init
+sleep 5  # Give conda init time to complete
+# Ensure conda environment is properly activated
+conda deactivate  # Just in case we're in another environment
 conda activate rbvrpenv
 
+# Verify conda environment
+if [[ "$CONDA_DEFAULT_ENV" != "rbvrpenv" ]]; then
+    echo "Failed to activate conda environment rbvrpenv"
+    exit 1
+fi
+
+# Continue with the main script
 python run.py --instance-config $instance_config --experiment-config $experiment_config --vis-config $vis_config --working-dir $WKDIR --gurobi-license PACE"> ${WKDIR}/${JSCRIPTDIR}/${job_log_id}.sbatch
 
     # Submit the job and capture the job ID
