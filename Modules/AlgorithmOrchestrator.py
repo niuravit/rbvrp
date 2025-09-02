@@ -1,6 +1,7 @@
 from data_model.Instance import *
 from data_model.ExperimentConfig import *
 from solver.MinimumFleetSizeWithTimeWindowModel import MinimumFleetSizeWithTimeWindowModel
+from solver.MinimumAverageTimeSpentModel import MinimumAverageTimeSpentModel
 import pandas as pd
 import os
 import json
@@ -34,6 +35,12 @@ class AlgorithmOrchestrator:
 
         if (self.experiment_config.model == "MinimumFleetSizeWithTimeWindowModel"):
             self.model = MinimumFleetSizeWithTimeWindowModel(
+                instance=self.instance_config,
+                experiment_config=self.experiment_config,
+                vis_config=self.edge_plot_config,
+                solution_directory=self.resolve_solution_directory(self.working_root_dir))
+        elif (self.experiment_config.model == "MinimumAverageTimeSpentModel"):
+            self.model = MinimumAverageTimeSpentModel(
                 instance=self.instance_config,
                 experiment_config=self.experiment_config,
                 vis_config=self.edge_plot_config,
