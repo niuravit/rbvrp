@@ -61,9 +61,8 @@ module load gurobi/11.0.1
 
 # Initialize conda properly
 conda init
-sleep 5  # Give conda init time to complete
+sleep 10  # Give conda init time to complete
 # Ensure conda environment is properly activated
-conda deactivate  # Just in case we're in another environment
 conda activate rbvrpenv
 
 # Verify conda environment
