@@ -1,6 +1,7 @@
 import pickle as pk
 from dataclasses import dataclass, field, asdict
 from typing import Dict, Any
+import numpy as np
 
 @dataclass(frozen=True)
 class ExperimentConfig:
@@ -19,7 +20,7 @@ class ExperimentConfig:
     dp_time_limit: float
     time_window: int
     tw_avg_factor: float
-    bnp_iteration_limit: int
+    bnp_node_limit: int
     bnp_time_limit: int
     model: str
     experiment_id: str = field(default_factory=lambda: "undefined_experiment_id")
@@ -29,6 +30,11 @@ class ExperimentConfig:
         """
         Creates an ExperimentConfig instance from a dictionary.
         """
+        if 'bnp_node_limit' not in config_dict:
+            config_dict['bnp_node_limit'] = None  # default value means no limit
+        else:
+            if (config_dict['bnp_node_limit'] == np.inf):
+                config_dict['bnp_node_limit'] = None # default value means no limit
         return cls(**config_dict)
 
     def get_experiment_name(self) -> str:
