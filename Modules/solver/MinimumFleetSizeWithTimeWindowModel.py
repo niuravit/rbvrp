@@ -84,7 +84,7 @@ class MinimumFleetSizeWithTimeWindowModel(OptimizationModel):
             if "marker_size" in self.vis_config["node_trace"]:
                 self.instance.node_trace['marker_size'] = self.vis_config["node_trace"]["marker_size"]
 
-    def get_solution_remaining_space_and_plot_routes(self, bnb_problem, ip_init_routes_df, ip_model, sol_name, plot_solution ):
+    def plot_route_solution(self, bnb_problem, ip_init_routes_df, ip_model, sol_name, plot_solution ):
         dummy_model = bnb_problem.rmp_initializer_model
         dummy_model.init_routes_df = ip_init_routes_df
         dummy_model.model = ip_model
@@ -99,8 +99,6 @@ class MinimumFleetSizeWithTimeWindowModel(OptimizationModel):
                 _cus_dem=self.instance.customer_demand,_title=plt_title,
                 _save_to_file=self.solution_directory+f'SOL_{sol_name}_{self.instance.instance_id}.png',
                 _display_plot=False,_display_info_table=True,_show_all_info=False)
-
-        return dummy_model.calculateAverageRemainingSpace(ip_model.getVars())
     
     def get_optimal_route_cost(self, bnb_problem, ip_init_routes_df, ip_model):
         dummy_model = bnb_problem.rmp_initializer_model
@@ -126,9 +124,37 @@ class MinimumFleetSizeWithTimeWindowModel(OptimizationModel):
         sol_stat['gap'] = (ip_obj-lp_obj)/lp_obj
         sol_stat['wallTime'] = wall_time
         # timing 
-        sol_stat['remSpace'] = self.get_solution_remaining_space_and_plot_routes(bnb_problem,ip_init_df,ip_model, sol_name,  plot_solution)
+        self.plot_route_solution(bnb_problem,ip_init_df,ip_model, sol_name,  plot_solution)
+        sol_stat['remSpace'] = self.get_ip_solution_avg_remaining_space(sol_stat['optimalRoutes'])
         sol_stat['optimalRoutes'] = self.get_optimal_route_cost(bnb_problem, ip_init_df, ip_model)
+        sol_stat['ip_solution_cost'] = self.get_ip_solution_cost(sol_stat['optimalRoutes'])
         return sol_stat
+    
+    def get_ip_solution_avg_remaining_space(self,optimal_route_stat):
+        total_remaining_space = 0
+        total_fleet_size = 0
+        for r_name, r_dict in optimal_route_stat.items():
+            total_remaining_space += (1-r_dict['utilization'])*r_dict['m']
+            total_fleet_size += r_dict['m']
+        avg_remaining_space = (total_remaining_space/total_fleet_size) if total_fleet_size>0 else None
+        return avg_remaining_space
+
+    def get_ip_solution_cost(self, optimal_route_stat):
+        total_fleet_size = 0
+        total_dem_weighted_time = 0
+        total_demand_served = 0
+        for r_name, r_dict in optimal_route_stat.items():
+            total_fleet_size += r_dict['m']
+            total_dem_weighted_time += r_dict['average_total_dem_weighted']
+            total_demand_served += r_dict['dem_served']
+        cost_dict = {
+            "M": total_fleet_size,
+            "total_dem_weighted_time": total_dem_weighted_time,
+            "total_demand_served": total_demand_served,
+            "avg_time_per_pkg": total_dem_weighted_time/total_demand_served if total_demand_served>0 else None,
+            "avg_time_per_pkg_in_min": total_dem_weighted_time*60/total_demand_served if total_demand_served>0 else None
+        }
+        return cost_dict
 
     def get_initial_node(self, problem):
         init_rmp_model = problem.rmp_initializer_model
@@ -167,19 +193,6 @@ class MinimumFleetSizeWithTimeWindowModel(OptimizationModel):
         bnb_log['wallTime'] = results.wall_time
         bnb_log['bnpTimeLim'] = self.experiment_config.bnp_time_limit
         return inst_log
-
-#         vis_sol.plot_network(instSol['bnpSol'],_nodeTce,_display_cus_dem=True,
-#                 _cus_dem=_cusDem,_title=_plt_title,
-#                 _save_to_file=_sol_dir+'SOL_IPBnp_{0}.png'.format(inst),
-#                 _display_plot=False,_display_info_table=True,_show_all_info=False)
-# #         try:
-# #             _plt_title = 'SOL_{0}stops_{1}_{2}'.format(_init_mstops,inst,str(round(instLog['%s-stopsBnp'%_init_mstops],2)))
-# #             vis_sol.plot_network(instSol['bnpSol'],_nodeTce,_display_cus_dem=True,
-# #                                  _cus_dem=_cusDem,_title=_plt_title,_save_to_file=_sol_dir+'SOL_{0}stopsBnp_{1}.png'.format(_init_mstops,inst),
-# #                                  _display_plot=False,_display_info_table=True,_show_all_info=False)
-# #         except:
-# #             print('Error occurred while trying to save img')
-        pass
 
 # Create a custom logger to capture branching decisions
 class CustomLogger:

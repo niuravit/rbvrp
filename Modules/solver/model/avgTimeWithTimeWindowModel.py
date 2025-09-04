@@ -739,33 +739,30 @@ class avgTimeWithTimeWindowModel:
                 self.colGenTe = time.time()-t1
                 self.colGenCompLog = _outerLogList
                 print('Col.Gen. Completed!...Elapsed-time:',self.colGenTe)
-                
-                        
-                    
         
-    def calculateAverageRemainingSpace(self,_model_vars,):
-        vars_value = pd.Series(_model_vars)
-        sol_vec = pd.DataFrame(index = vars_value.apply(lambda x:x.VarName))
-        sol_vec['value'] = vars_value.apply(lambda x:x.X).values
-        optimal_routes_name_list = sol_vec.loc[sol_vec['value']>=0.98].index.to_list()
-        _cumulative_space = 0
-        for j in range(len(optimal_routes_name_list)):
-            _route_name = optimal_routes_name_list[j]
-            _cumulative_space+=self.getRemainingSpace(_route_name)
-        _avg_rem_space = _cumulative_space/self.total_fleet_size
-        return _avg_rem_space
+    # def calculateAverageRemainingSpace(self,_model_vars,):
+    #     vars_value = pd.Series(_model_vars)
+    #     sol_vec = pd.DataFrame(index = vars_value.apply(lambda x:x.VarName))
+    #     sol_vec['value'] = vars_value.apply(lambda x:x.X).values
+    #     optimal_routes_name_list = sol_vec.loc[sol_vec['value']>=0.98].index.to_list()
+    #     _cumulative_space = 0
+    #     for j in range(len(optimal_routes_name_list)):
+    #         _route_name = optimal_routes_name_list[j]
+    #         _cumulative_space+=self.getRemainingSpace(_route_name)
+    #     _avg_rem_space = _cumulative_space/self.total_fleet_size
+    #     return _avg_rem_space
         
-    def getRemainingSpace(self, _route_name):
-        '''Absolute remaining space for all mr'''
-        ref_df = self.init_routes_df.set_index('labels')
-        _col = ref_df.loc[:][_route_name]
-        _mr = _col['m']
-        node_seq = pd.Series(_col.iloc[self.customer_index][_col>=0.7].index)
-        _qr = sum([self.customer_demand[c] for c in node_seq])
-        _lr = _col['lr']
-        _abs_rem_space = (_mr*self.vehicle_capacity) - (_lr*_qr)
-        print(_route_name,', Rem. space=',_abs_rem_space,', mr=',_mr)
-        return _abs_rem_space
+    # def getRemainingSpace(self, _route_name):
+    #     '''Absolute remaining space for all mr'''
+    #     ref_df = self.init_routes_df.set_index('labels')
+    #     _col = ref_df.loc[:][_route_name]
+    #     _mr = _col['m']
+    #     node_seq = pd.Series(_col.iloc[self.customer_index][_col>=0.7].index)
+    #     _qr = sum([self.customer_demand[c] for c in node_seq])
+    #     _lr = _col['lr']
+    #     _abs_rem_space = (_mr*self.vehicle_capacity) - (_lr*_qr)
+    #     print(_route_name,', Rem. space=',_abs_rem_space,', mr=',_mr)
+    #     return _abs_rem_space
         
     def getRoute4Plot(self, _route_name_list, _colums_df,_route_config):
         reformatted_arcs=[]
@@ -776,8 +773,8 @@ class avgTimeWithTimeWindowModel:
                     "#FCCC1A","#C21460","#FEFE33"]
         content_array = ['arcs_list','config','route_info','info_topics',
                          'column_width','column_format']
-        route_info_topic_array = ['lr','total_demand','demand_waiting','avg_waiting_per_pkg','pkgs','utilization']
-        column_width = [3,3,3.5,3,3.2,3.2]
+        route_info_topic_array = ['lr','total_demand','demand_waiting','avg_waiting_per_pkg','pkgs_per_veh','utilization']
+        column_width = [2.5,2.5,3.5,3,3,3.2]
         column_format = ['.2f','.2f',None,'.2f','.2f','.2f']
         for j in range(len(_route_name_list)):
             idx = _route_name_list[j]
@@ -798,10 +795,12 @@ class avgTimeWithTimeWindowModel:
             _lr = sample_r.loc['lr']
             _dem_waiting = cost_dict['dem_waiting']
             _avg_waiting_per_pkg = _avg_CTC_cost/_qr
-            _pkgs = _lr*(_qr)
-            _util = (self.vehicle_capacity*_mr-self.getRemainingSpace(idx))*100/(self.vehicle_capacity*_mr)
+            _pkgs_per_vehicle = cost_dict['pkgs_served_per_vehicle']
+            _util = cost_dict['utilization']*100
+            # _pkgs = _lr*(_qr)
+            # _util = (self.vehicle_capacity*_mr-self.getRemainingSpace(idx))*100/(self.vehicle_capacity*_mr)
             ###########
-            route_info_value = [_lr,_qr,_dem_waiting,_avg_waiting_per_pkg,_pkgs,_util]
+            route_info_value = [_lr,_qr,_dem_waiting,_avg_waiting_per_pkg,_pkgs_per_vehicle,_util]
             route_info_dict = dict(zip(route_info_topic_array,route_info_value))
             route_plot_dict = dict(zip(content_array,
                            [sample_arcs.index.to_list(),curr_route_config,

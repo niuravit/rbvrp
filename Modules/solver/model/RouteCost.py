@@ -114,6 +114,10 @@ class RouteCost:
             if next_node != self.depot:
                 qr -= self.customer_demand[next_node]
                 demand_travel_times[next_node] += accumulated_distance
+        
+        pkg_served = route_demand*lr
+        pkg_served_per_vehicle = pkg_served/m
+        utilization = pkg_served_per_vehicle/self.constant_dict['truck_capacity']
 
         return {
             "l_r": lr,
@@ -124,7 +128,10 @@ class RouteCost:
             "dem_waiting": demand_travel_times,
             "avg_waiting": avg_waiting,
             "travel_dem_weighted": total_travel_cost,
-            "average_total_dem_weighted": total_travel_cost + avg_waiting
+            "average_total_dem_weighted": total_travel_cost + avg_waiting,
+            "pkgs_served": pkg_served,
+            "pkgs_served_per_vehicle": pkg_served_per_vehicle,
+            "utilization": utilization
         }
     
     def get_resource_utilization(self, route: pd.Series) -> Dict[str, float]:

@@ -150,13 +150,13 @@ class MinimumAverageTimeWithTimeWindowModel(OptimizationModel):
             if "marker_size" in self.vis_config["node_trace"]:
                 self.instance.node_trace['marker_size'] = self.vis_config["node_trace"]["marker_size"]
 
-    def get_solution_remaining_space_and_plot_routes(self, bnb_problem, ip_init_routes_df, ip_model, sol_name, sol_phase, plot_solution ):
+    def plot_route_solution(self, bnb_problem, ip_init_routes_df, ip_model, sol_name, sol_phase, plot_solution ):
         dummy_model = bnb_problem.rmp_initializer_model
         dummy_model.init_routes_df = ip_init_routes_df
         dummy_model.model = ip_model
 
         if plot_solution:
-            twBnP_sol = dummy_model.getRouteSolution(ip_model.getVars(),
+            matBnP_sol = dummy_model.getRouteSolution(ip_model.getVars(),
                                              self.vis_config, self.instance.node_trace,
                                               self.instance.customer_demand)
             if sol_phase == 1:
@@ -164,12 +164,10 @@ class MinimumAverageTimeWithTimeWindowModel(OptimizationModel):
             elif sol_phase == 2:
                 plt_title = f"SOL_{sol_name}_{self.instance.instance_id}_{str(self.get_obj_in_min_per_pkg(ip_model.ObjVal))}min-per-pkg_{self.instance.distance_metric}"
             else: raise Exception("sol_phase must be 1 or 2")
-            plot_network(twBnP_sol,self.instance.node_trace,_display_cus_dem=True,
+            plot_network(matBnP_sol,self.instance.node_trace,_display_cus_dem=True,
                 _cus_dem=self.instance.customer_demand,_title=plt_title,
                 _save_to_file=self.solution_directory+f'SOL_{sol_name}_{self.instance.instance_id}.png',
                 _display_plot=False,_display_info_table=True,_show_all_info=False)
-
-        return dummy_model.calculateAverageRemainingSpace(ip_model.getVars())
     
     def get_optimal_route_cost(self, bnb_problem, ip_init_routes_df, ip_model):
         dummy_model = bnb_problem.rmp_initializer_model
@@ -198,10 +196,39 @@ class MinimumAverageTimeWithTimeWindowModel(OptimizationModel):
         sol_stat['gap'] = (ip_obj-lp_obj)/lp_obj
         sol_stat['wallTime'] = wall_time 
         # timing 
-        sol_stat['remSpace'] = self.get_solution_remaining_space_and_plot_routes(bnb_problem,ip_init_df,ip_model, sol_name, sol_phase, plot_solution)
+        self.plot_route_solution(bnb_problem,ip_init_df,ip_model, sol_name, sol_phase, plot_solution)
         sol_stat['optimalRoutes'] = self.get_optimal_route_cost(bnb_problem, ip_init_df, ip_model)
+        sol_stat['ip_solution_cost'] = self.get_ip_solution_cost(sol_stat['optimalRoutes'])
+        sol_stat['remSpace'] = self.get_ip_solution_avg_remaining_space(sol_stat['optimalRoutes'])
         sol_stat['total_fleet_size'] = ip_model.getConstrByName("fleet_size").RHS if ip_model.getConstrByName("fleet_size") is not None else None
         return sol_stat
+    
+    def get_ip_solution_avg_remaining_space(self,optimal_route_stat):
+        total_remaining_space = 0
+        total_fleet_size = 0
+        for r_name, r_dict in optimal_route_stat.items():
+            total_remaining_space += (1-r_dict['utilization'])*r_dict['m']
+            total_fleet_size += r_dict['m']
+        avg_remaining_space = (total_remaining_space/total_fleet_size) if total_fleet_size>0 else None
+        return avg_remaining_space
+    
+    def get_ip_solution_cost(self, optimal_route_stat):
+        total_fleet_size = 0
+        total_dem_weighted_time = 0
+        total_demand_served = 0
+        for r_name, r_dict in optimal_route_stat.items():
+            total_fleet_size += r_dict['m']
+            total_dem_weighted_time += r_dict['average_total_dem_weighted']
+            total_demand_served += r_dict['dem_served']
+        cost_dict = {
+            "M": total_fleet_size,
+            "total_dem_weighted_time": total_dem_weighted_time,
+            "total_demand_served": total_demand_served,
+            "avg_time_per_pkg": total_dem_weighted_time/total_demand_served if total_demand_served>0 else None,
+            "avg_time_per_pkg_in_min": total_dem_weighted_time*60/total_demand_served if total_demand_served>0 else None
+        }
+        return cost_dict
+
 
     def get_initial_node(self, problem):
         init_rmp_model = problem.rmp_initializer_model
