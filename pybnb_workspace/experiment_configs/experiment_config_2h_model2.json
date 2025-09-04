@@ -12,7 +12,7 @@
         "time_window":2,
         "tw_avg_factor":1,
         "bnp_node_limit":"Infinity",
-        "bnp_time_limit":18000,
-        "model":"MinimumFleetSizeWithTimeWindowModel"
+        "bnp_time_limit":7200,
+        "model":"MinimumAverageTimeWithTimeWindowModel"
     }
 ]
