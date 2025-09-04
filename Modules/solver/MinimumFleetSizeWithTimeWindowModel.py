@@ -125,8 +125,8 @@ class MinimumFleetSizeWithTimeWindowModel(OptimizationModel):
         sol_stat['wallTime'] = wall_time
         # timing 
         self.plot_route_solution(bnb_problem,ip_init_df,ip_model, sol_name,  plot_solution)
-        sol_stat['remSpace'] = self.get_ip_solution_avg_remaining_space(sol_stat['optimalRoutes'])
         sol_stat['optimalRoutes'] = self.get_optimal_route_cost(bnb_problem, ip_init_df, ip_model)
+        sol_stat['remSpace'] = self.get_ip_solution_avg_remaining_space(sol_stat['optimalRoutes'])
         sol_stat['ip_solution_cost'] = self.get_ip_solution_cost(sol_stat['optimalRoutes'])
         return sol_stat
     
