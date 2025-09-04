@@ -268,8 +268,8 @@ class InitialRouteGenerator:
                     # 1) Demand feasibility
                     veh_min_feas = int(np.ceil(total_demand * total_time / self.truck_capacity))
                     # 2) Time window feasibility if tw and tw_factor specified
-                    veh_min_tw = np.ceil((tw_factor * (travel_time_without_return+(last_leg_dist / self.truck_speed))) / (tw - travel_time_without_return)) if tw < np.inf else 0
-                    veh_min_no = max(veh_min_tw, veh_min_feas)
+                    veh_min_tw = int(np.ceil((tw_factor * (travel_time_without_return+(last_leg_dist / self.truck_speed))) / (tw - travel_time_without_return))) if tw < np.inf else 0
+                    veh_min_no = int(max(veh_min_tw, veh_min_feas))
 
                     if (init_max_mpr < np.inf):
                         if (veh_min_no <= init_max_mpr):

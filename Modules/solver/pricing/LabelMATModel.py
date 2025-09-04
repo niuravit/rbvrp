@@ -3,9 +3,9 @@ from solver.pricing.LabelAbstract import Label
 from solver.pricing.DominanceLabel import DominanceLabel
 
 
-class LabelTWModel(Label):
+class LabelMATModel(Label):
     """Represents a state in the label-setting algorithm."""
-    def __init__(self, i, acc_demand, acc_length, acc_duals, stops, m, reward, reached_flg, prevN, counter,
+    def __init__(self, i, acc_demand, acc_length, acc_duals, stops, m, reward, h_opt, reached_flg, prevN, counter,
                   dominance_label: DominanceLabel = DominanceLabel.UNDEFINED):
         self.i = i
         self.acc_demand = acc_demand
@@ -14,6 +14,7 @@ class LabelTWModel(Label):
         self.stops = stops
         self.m = m
         self.reward = reward
+        self.h_opt = h_opt
         self.reached_flg = reached_flg
         self.prevN = prevN
         self.counter = counter

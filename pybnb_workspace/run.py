@@ -8,41 +8,16 @@ ARG_COLOR = '#104375'
 DEPOT_COLOR = '#D0F6FF'
 NODE_COLOR = '#484848'
 
+import os
+print(os.getcwd())
+
 import sys
 sys.path.insert(0,MODULE_DIR)
-import importlib
-from datetime import datetime
-
-import visualize_sol as vis_sol
-import initialize_path as init_path
-import random_instance as rand_inst
+sys.path.insert(0,"./Modules")
 import utility as util
-import model as md
-import bnp as bnp
-
-import numpy as np
 from gurobipy import *
-import os
-
-from itertools import combinations,permutations 
-import pandas as pd
-import itertools
-import plotly.graph_objects as go
-import networkx as nx
-import plotly.offline as py 
-import pickle as pk
-import nltk
-import time
-import copy
 import argparse
 
-from matplotlib import pyplot as plt
-from sklearn.datasets import make_blobs
-from sklearn.cluster import KMeans
-from scipy.spatial import distance
-import logging
-
-import pybnb
 from copy import deepcopy
 from math import ceil
 

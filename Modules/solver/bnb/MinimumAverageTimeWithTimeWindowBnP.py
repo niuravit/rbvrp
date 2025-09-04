@@ -4,62 +4,100 @@ import os
 os.environ['GRB_LICENSE_FILE'] = '/Users/ravitpichayavet/gurobi.lic'
 import numpy as np
 from itertools import combinations,permutations 
-import random 
 import pandas as pd
-import pickle as pk
 import pybnb
-import gurobipy as gp
-from gurobipy import Var
+from gurobipy import *
 from copy import deepcopy
 from math import ceil,floor
-from datetime import datetime
 epsilon = 1e-6
 import time
-import visualize_sol as vis_sol
-import initialize_path as init_path
-import random_instance as rand_inst
-import utility as util
-import model as md
+import solver.model.avgTimeWithTimeWindowModel as md
+from solver.bnb.MinimumFleetSizeWithTimeWindowBnP import get_route_patterns
 from typing import Dict, List, Any, Tuple, Optional
         
-class MinimumAverageTimeSpentBnP(pybnb.Problem):
-    def __init__(self, _dist_mat, _initializer, _init_route, _const_dict, _chDom = True, _acc_flag = None, _dom_rule=None):
+class MinimumAverageTimeWithTimeWindowBnP(pybnb.Problem):
+    def __init__(self, _dist_mat, _initializer, _const_dict, _sol_dir, _chDom = True, _acc_flag = None, _dom_rule=None):
         self.inst_dist_mat = _dist_mat
         self.initializer = _initializer
         self.constant_dict = _const_dict
         self.b_cond_log = []; self.del_pats = []
         self.lp_sol = None
         self.loc_bound = None
-        # some formatting
-        df_lab = _initializer.init_routes_df.set_index("labels");
-        scc_cols = df_lab.loc[df_lab.index.isin(_initializer.arcs),:]
-        self.route_pats = {r_name: {k:v for k,v in r_dict.items() if v>0} for r_name, r_dict in scc_cols.to_dict().items()} 
-        # Root node rmp
-        self.rmp_initializer_model = md.phaseIIModel(_init_route, _initializer,
-             _dist_mat,_const_dict, _relax_route=False)
-        self.rmp_initializer_model.buildModel();
-        self.rmp_initializer_model.model.setParam('OutputFlag',False)
-        self.rmp_model = self.rmp_initializer_model.model.copy()
-        self.rmp_init_df = deepcopy(_initializer.init_routes_df)
-        
-        # Network
-        self.label = _initializer.init_routes_df["labels"];
-        self.arcs = self.rmp_initializer_model.arcs
-        self.arcs_drp_org = [a for a in self.arcs if 'O' not in a]
-        self.arcs_index = self.rmp_initializer_model.arcs_index
-        self.nodes = self.rmp_initializer_model.nodes
-        
+        self.name = "MAT_TW"
+
         self.is_root_node = True
         self.ch_dom = _chDom
         self.dom_rule = _dom_rule
         self.node_count = 0
+        self.solution_directory = _sol_dir
+
+        # # some formatting
+        # df_lab = _initializer.init_routes_df.set_index("labels");
+        # scc_cols = df_lab.loc[df_lab.index.isin(_initializer.arcs),:]
+        # self.route_pats = {r_name: {k:v for k,v in r_dict.items() if v>0} for r_name, r_dict in scc_cols.to_dict().items()} 
+        # # Root node rmp
+        # self.rmp_initializer_model = md.phaseIIModel(_init_route, _initializer,
+        #      _dist_mat,_const_dict, _relax_route=False)
+        # self.rmp_initializer_model.buildModel();
+        # self.rmp_initializer_model.model.setParam('OutputFlag',False)
+        # self.rmp_model = self.rmp_initializer_model.model.copy()
+        # self.rmp_init_df = deepcopy(_initializer.init_routes_df)
         
-        # [ip_obj, route_pats, model, init_df, node_count]
-        self.best_node = [1e10, self.route_pats, self.rmp_model, self.rmp_init_df, self.node_count ]
+        # # Network
+        # self.label = _initializer.init_routes_df["labels"];
+        # self.arcs = self.rmp_initializer_model.arcs
+        # self.arcs_drp_org = [a for a in self.arcs if 'O' not in a]
+        # self.arcs_index = self.rmp_initializer_model.arcs_index
+        # self.nodes = self.rmp_initializer_model.nodes
+        
+        # # [ip_obj, route_pats, model, init_df, node_count]
+        # self.best_node = [1e10, self.route_pats, self.rmp_model, self.rmp_init_df, self.node_count ]
         
         # acc flag
         self.acc_flag = _acc_flag
-        
+
+    def load_rmp_initial_model(self, initializer, initial_model_instance, initial_route_df):
+        self.rmp_initializer_model = md.avgTimeWithTimeWindowModel(None, initializer,
+             self.inst_dist_mat,self.constant_dict, _relax_route=True)
+        # self.rmp_initializer_model.buildModel();
+        self.rmp_model = initial_model_instance.copy()
+        self.rmp_initializer_model.model = self.rmp_model
+        self.rmp_initializer_model.model.setParam('OutputFlag',False)
+        self.rmp_init_df = deepcopy(initial_route_df)
+        self.rmp_initializer_model.init_routes_df = self.rmp_init_df
+
+        # we need to add fleet size constraint & assign new obj coeff for all variables
+        cols = initial_route_df.set_index('labels')
+        self.rmp_model.addConstr((quicksum(cols.loc['m',v.varName]*v for v in self.rmp_model.getVars()) <= self.constant_dict["total_fleet_size"]), name="fleet_size")
+
+        # calculate route cost
+        self.rmp_initializer_model.generateCostOfRoutes()
+        for var in self.rmp_model.getVars():
+            var.Obj = self.rmp_initializer_model.route_cost[var.varName]['average_total_dem_weighted']
+        self.rmp_initializer_model.model.update()
+
+        # then we solve the root node relax
+        self.rmp_initializer_model.solveRelaxedBoundedModel()
+        self.rmp_initializer_model.solveModel()
+
+        df_lab = initializer.init_routes_df.set_index("labels");
+        scc_cols = df_lab.loc[df_lab.index.isin(initializer.arcs),:]
+        self.route_pats = {r_name: {k:v for k,v in r_dict.items() if v>0} for r_name, r_dict in scc_cols.to_dict().items()} 
+
+        # Network
+        self.label = initializer.init_routes_df["labels"];
+        self.arcs = self.rmp_initializer_model.arcs
+        self.arcs_drp_org = [a for a in self.arcs if 'O' not in a]
+        self.arcs_index = self.rmp_initializer_model.arcs_index
+        self.nodes = self.rmp_initializer_model.nodes
+
+        # let's change the node storage to store lp and ip val
+        # [lp_obj, ip_obj, route_pats, model, init_df, node_count, solve time]
+        self.init_node = [self.rmp_initializer_model.relaxedBoundedModel.ObjVal, self.rmp_initializer_model.model.ObjVal, self.route_pats, self.rmp_initializer_model.model, self.rmp_init_df, 0, 0.0]
+        # use initial node as best node
+        self.best_node = [self.rmp_initializer_model.relaxedBoundedModel.ObjVal, self.rmp_initializer_model.model.ObjVal, self.route_pats, self.rmp_initializer_model.model, self.rmp_init_df, 0, 0.0]
+        self.solve_start_time = time.time()
+        pass
     
     def sense(self):
         return pybnb.minimize
@@ -72,21 +110,20 @@ class MinimumAverageTimeSpentBnP(pybnb.Problem):
             temp_m_ip_bound.shortCuttingColumns()
             temp_m_ip_bound.model.update()
             temp_m_ip_bound.solveModel()
-#             ip_obj = sum([p.Obj for p in temp_m_ip_bound.relaxedBoundedModel.getVars() if p.X>0] )
-            ip_obj = temp_m_ip_bound.model.ObjVal
+            ip_obj = np.round(temp_m_ip_bound.model.ObjVal,6)
             print("LP/IP:",lp_obj,ip_obj)
             p_vars = temp_m_ip_bound.model.getVars()
-            _route_pats_shortcut = dict( [ (p.varName ,  
-                                       dict( [(self.label[a_idx], 
-                                               temp_m_ip_bound.init_routes_df[p.varName][a_idx])
-                                                for a_idx in self.arcs_index 
-                                                    if temp_m_ip_bound.init_routes_df[p.varName][a_idx]>0] )
-                                                      ) for p in p_vars ] )
+            _route_pats_shortcut = get_route_patterns(p_vars, temp_m_ip_bound.init_routes_df, self.arcs_index)
+            current_solve_time = time.time() - self.solve_start_time  # Get current walltime                                                                        
             print("IP SOLUTIONS:",[[p.varName, p.x, _route_pats_shortcut[p.varName]] for p in p_vars if p.x >0])
+            if self.is_root_node:
+                print("==THIS IS ROOT NODE!:", self.is_root_node); self.is_root_node = False
+                self.root_node = [lp_obj, ip_obj, _route_pats_shortcut,temp_m_ip_bound.model,
+                                   temp_m_ip_bound.init_routes_df, self.node_count, current_solve_time]
             # update best node:
-            if ip_obj<self.best_node[0]:
+            if ip_obj<self.best_node[1]:
                 print("Best Node found!")
-                self.best_node = [ip_obj, _route_pats_shortcut,temp_m_ip_bound.model, temp_m_ip_bound.init_routes_df, self.node_count ]
+                self.best_node = [lp_obj, ip_obj, _route_pats_shortcut,temp_m_ip_bound.model, temp_m_ip_bound.init_routes_df, self.node_count, current_solve_time ]
             return ip_obj
         else:
             return 1e10
@@ -97,6 +134,19 @@ class MinimumAverageTimeSpentBnP(pybnb.Problem):
         if (self.loc_bound-np.floor(self.loc_bound))>1e-6:
             new_lb = np.round(self.loc_bound,6)
         else: new_lb = np.floor(self.loc_bound)
+        # Log node details after solving
+        if hasattr(self, 'custom_logger') and self.custom_logger is not None:
+            node_id = self.node_count
+            # Format branching conditions more concisely
+            branch_conds = []
+            for arc, val in self.b_cond_log:
+                branch_conds.append(f"{arc}={val}")
+            branch_str = ", ".join(branch_conds) if branch_conds else "root"
+            
+            # Create a single line entry aligned with pybnb's table format
+            node_info = [f"Node {self.node_count}, relaxedLPObj {self.loc_bound}, Branching conditions: {branch_str}"]
+            self.custom_logger.log_branch(node_info)
+
         print("==Called bound(), Update LOCAL BOUND:", new_lb) 
         return new_lb
 
@@ -117,27 +167,21 @@ class MinimumAverageTimeSpentBnP(pybnb.Problem):
         # From Node
         _route_pats = self.route_pats
         _b_cond_log = self.b_cond_log
-            # _del_pats = self.del_pats #don't need will create new here
         _cur_rmp_model = self.rmp_initializer_model
         _cur_rmp_model.model = self.rmp_model.copy() # Import node model
         
         # for braching
         _temp_model = self.rmp_initializer_model
         _temp_model.model = self.rmp_model.copy()
-#         _temp_model.shortCutColumnsBnp()
         _temp_model.solveRelaxedBoundedModel()
         _m_constrs = _temp_model.model.getConstrs()
         p_vars = _temp_model.relaxedBoundedModel.getVars() #Load current node's model
         _objVal = _temp_model.relaxedBoundedModel.ObjVal
 
-#         print(_route_pats)
-#         print("Temp model Sol:",[[p.varName, p.x,_route_pats[p.varName]] for p in p_vars if p.x >0])
-        
-        # get the pair vars
-        # find the first fractional variable and branch
         frac = None
         val = None
         gap = None
+
         print("==Called branch, branching with cond:",_b_cond_log)
         _not_bch_arcs =[]
         for a in _b_cond_log:
@@ -182,8 +226,8 @@ class MinimumAverageTimeSpentBnP(pybnb.Problem):
 #                     else: frac_dict[arc] = val
 
             bch_arcs_dict = dict(); bch_arcs=[]
-#             print("r_w_cycle",r_w_cycle)
-#             print("frac_dict",frac_dict)
+            print("r_w_cycle",r_w_cycle)
+            print("frac_dict",frac_dict)
             if (len(r_w_cycle) > 0):
                 # Build node incident dict of route
                 for r_name in r_w_cycle:
@@ -201,13 +245,12 @@ class MinimumAverageTimeSpentBnP(pybnb.Problem):
 #                     print("r_name",r_name, "Incident-dict",incident_dict)
 #                 for r_name in r_w_cycle:
 #                     bch_arcs += _route_pats[r_name].keys()
-#                 print("bch_arcs",bch_arcs)
+                print("bch_arcs",bch_arcs)
                 for a in bch_arcs: 
                     if ((a in self.arcs) and (a not in _not_bch_arcs)):
                         # Avoid branch on arc with O to help speed up
                         if (("O" in a) and (arc_score_dict[a]!=1)): bch_arcs_dict[a] = arc_score_dict[a]
                         else: bch_arcs_dict[a] = arc_score_dict[a] 
-#                 bch_arcs_dict = dict([(a,arc_score_dict[a] ) for a in bch_arcs if ((a in self.arcs) and (a not in _not_bch_arcs))])
                 print("bch_arcs_dict",bch_arcs_dict)
                 if len(bch_arcs_dict.keys())>0:
                     frac = max(bch_arcs_dict, key = bch_arcs_dict.get)
@@ -217,10 +260,6 @@ class MinimumAverageTimeSpentBnP(pybnb.Problem):
 #                     frac = random.choice(list(frac_dict.keys()))
             elif (len(frac_dict.keys())>0):
                 frac = max(frac_dict, key = frac_dict.get)
-#                 frac = random.choice(list(frac_dict.keys()))
-#             print("_route_pats",_route_pats)
-            
-#             print("arc_score_dict",arc_score_dict)
             
             print("frac",frac)
             if frac!=None:
@@ -315,18 +354,13 @@ def SolveMinAverageTimeSpentNode(cTCCVRP_mt):
     print("_outflow_dict",_outflow_dict)
     
     # PENALIZING
-#     m_lab_idx = cTCCVRP_mt.label.loc[cTCCVRP_mt.label=='m'].index[0]
+    # m_lab_idx = cTCCVRP_mt.label.loc[cTCCVRP_mt.label=='m'].index[0]
     for v in _minAverageTimeLP_node.model.getVars():
         if v.varName in _del_pats: 
-#             _minAverageTimeLP_node.init_routes_df.loc[m_lab_idx,v.varName] = 1e10
+            # _minAverageTimeLP_node.init_routes_df.loc[m_lab_idx,v.varName] = 1e10
             v.Obj = 1e10
-#             _route_pats.pop(v.varName)
-#     print("==Solving node, with braching conds list:",_b_cond_log)
-#     print("==Len Vars:",len(_minAverageTimeLP_node.model.getVars()))
-#     print("==Del Pats:",_del_pats)
+
     _minAverageTimeLP_node.model.update()
-#     print("DFAFTERDROP:",_minAverageTimeLP_node.init_routes_df.columns)
-#     print("MODELVARS:",_minAverageTimeLP_node.model.getVars())
     
     # check if model is infeasible
     # if so, return inf
@@ -345,7 +379,7 @@ def SolveMinAverageTimeSpentNode(cTCCVRP_mt):
     t1 = time.time()
     _minAverageTimeLP_node.runColumnsGeneration(None,_pricing_status=False,
             _check_dominance=_chDom,_dominance_rule=_domRule ,_DP_ver="SIMUL_M",
-            _time_limit=_const_dict['dp_time_limit'],_filtering_mode="BestRwdPerI",
+            _time_limit=_const_dict['dp_time_limit'],_filtering_mode="TopKRwdPerI",
             _bch_cond = _b_cond_log,_node_count_lab = str(_node_count),
             _acc_flag =cTCCVRP_mt.acc_flag)
     colGen_te = time.time()-t1
@@ -353,31 +387,19 @@ def SolveMinAverageTimeSpentNode(cTCCVRP_mt):
     _minAverageTimeLP_node.solveRelaxedBoundedModel()
     mrelax_obj = _minAverageTimeLP_node.relaxedBoundedModel.ObjVal
     p_vars = _minAverageTimeLP_node.relaxedBoundedModel.getVars()
-    if cTCCVRP_mt.is_root_node:
-        print("==THIS IS ROOT NODE!:", cTCCVRP_mt.is_root_node); cTCCVRP_mt.is_root_node = False;
-        cTCCVRP_mt.root_node = [mrelax_obj, _minAverageTimeLP_node.model, _minAverageTimeLP_node.init_routes_df, colGen_te,_minAverageTimeLP_node.colgenLogs]
-        cTCCVRP_mt.is_root_node = False
-    else: 
-        print("==THIS IS NODE:",_node_count)
-    
+    print("==THIS IS NODE:",_node_count)
     
     print("LP-ColGen OBJ:",_minAverageTimeLP_node.relaxedBoundedModel.ObjVal)
     cTCCVRP_mt.save_lp_file(model = _minAverageTimeLP_node.relaxedBoundedModel,
-                            fname = f"relaxModel-node{_node_count}.lp")
-    # _minAverageTimeLP_node.relaxedBoundedModel.write(f"./relaxModel-node{_node_count}.lp")
+                            fname = f"matRelaxModel-node{_node_count}")
+    _minAverageTimeLP_node.init_routes_df.to_csv(f"{cTCCVRP_mt.solution_directory}/route_df-node{_node_count}.csv")
     print("ModelVars, DataFrameVars :", len(p_vars),len(_minAverageTimeLP_node.init_routes_df.columns)-1)
-    
-    _route_pats = dict( [ (p.varName ,   dict( [(cTCCVRP_mt.label[a_idx], _minAverageTimeLP_node.init_routes_df[p.varName][a_idx])
-                                                    for a_idx in cTCCVRP_mt.arcs_index 
-                                                        if _minAverageTimeLP_node.init_routes_df[p.varName][a_idx]>0] )
-                              ) for p in p_vars ] )
-#         mrelax_obj = _minAverageTimeLP_node.relaxedBoundedModel.ObjVal
-#         scc_cols = _minAverageTimeLP_node.init_routes_df.loc[_minAverageTimeLP_node.customer_index,:].drop(columns = "labels")
-#         scc_cols['new_index'] = range(1,_n+1)
-#         _route_pats = scc_cols.set_index('new_index').to_dict()
-#         p_vars = _minAverageTimeLP_node.relaxedBoundedModel.getVars()
+    _route_pats = get_route_patterns(p_vars, _minAverageTimeLP_node.init_routes_df, cTCCVRP_mt.arcs_index)
+    # _route_pats = dict( [ (p.varName ,   dict( [(cTCCVRP_mt.label[a_idx], _minAverageTimeLP_node.init_routes_df[p.varName][a_idx])
+    #                                                 for a_idx in cTCCVRP_mt.arcs_index 
+    #                                                     if _minAverageTimeLP_node.init_routes_df[p.varName][a_idx]>0] )
+    #                           ) for p in p_vars ] )
     print("==Obj-val colgen:", mrelax_obj)
-#     print("==Del Pats:",_del_pats)
     print("==Branching Condition:", _b_cond_log)
     print([[p.varName, p.x, _route_pats[p.varName]] for p in p_vars if p.x >0])
     lp_sol = dict([(p.varName,(p.x)) for p in p_vars])

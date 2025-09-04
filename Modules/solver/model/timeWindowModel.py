@@ -255,26 +255,15 @@ class timeWindowModel:
 #                 print(node_seq,sct_seq)
                 qr = sum([self.customer_demand[c] for c in sct_seq])
                 lr = self.calculateLr(arc_route)
-                _c_tsp = (lr*qr)/(2*col['m'])
+                m_opt_recal = self.calculate_opt_route_fleet_size(lr,qr,visited_seq[-1])
                 _route_coef = np.array(sct_seq+arc_route,dtype=object)
                 sc_col = pd.Series(index = _cols.index,data=0.0,name=r_name)
                 sc_col.loc[_route_coef]+=1
-                sc_col.loc['m'] = col['m']
+                sc_col.loc['m'] = m_opt_recal
                 sc_col.loc['lr'] = lr
-#                 print(sc_col)
-#                 return sc_col
-#                 print(r_name,'OldCost:',self.model.getVarByName(r_name).Obj ,'SCTCost:',_cost)
                 #Update DF: Use sc_col for updating init_routes_df
                 r_var = self.model.getVarByName(r_name)
-                # m_constrs = self.model.getConstrs()
-                # r_var.Obj = col['m'] # update new m
-                # up_list =[]
-                self.update_variable_coefficients(sc_col, r_var, forbidden_arcs)
-                # for const_idx in range(len(m_constrs)):
-                #     new_coeff = sc_col.loc["c_%s"%(const_idx+1)]
-                #     self.model.chgCoeff(m_constrs[const_idx],r_var,new_coeff)
-                #     up_list.append(["c_%s"%(const_idx+1),new_coeff])
-#                 print(sc_col[:20],up_list)
+                self.update_variable_coefficients(sc_col, r_var, m_opt_recal, forbidden_arcs)
                 self.model.update()
                 self.init_routes_df.loc[:,r_name] = sc_col.values
                 sc_col_count+=1
@@ -283,7 +272,13 @@ class timeWindowModel:
         self.shortcutColsPc = len(DP_cols.columns)
         self.shortcutColsTe = time.time()-t1
     
-    def update_variable_coefficients(self, sc_col, r_var: Var, _forbidden_arcs = None):
+    def calculate_opt_route_fleet_size(self, lr, qr, last_customer):
+        travel_length_to_last_customer = lr - self.cost_matrix[(int(last_customer.split("_")[-1]), 0)]
+        m_ctc = np.ceil((qr * (lr )) / self.vehicle_capacity)
+        m_tw = np.ceil((lr ) / (self.constant_dict['time_window'] - travel_length_to_last_customer))
+        return max(m_ctc, m_tw)
+
+    def update_variable_coefficients(self, sc_col, r_var: Var, m_opt_recal: int, _forbidden_arcs = None):
         """
         Updates the coefficients of a variable in the model using a Gurobi Column object.
 
@@ -292,7 +287,7 @@ class timeWindowModel:
             r_var: The Gurobi variable whose coefficients you want to change.
         """
         # Update the objective coefficient of the existing variable
-        var_obj = 1e10 if self.col_contains_forbidden_arc(sc_col,self.convert_forbidden_links(_forbidden_arcs)) else r_var.obj
+        var_obj = 1e10 if self.col_contains_forbidden_arc(sc_col,self.convert_forbidden_links(_forbidden_arcs)) else m_opt_recal
         r_var.obj = var_obj
 
         # 1. Get the list of all constraints in the model
@@ -306,33 +301,6 @@ class timeWindowModel:
             self.model.chgCoeff(constr,r_var,new_coeff)
             # up_list.append(["c_%s"%(const_idx+1),new_coeff])
         
-        # Assuming the constraints are ordered correctly and their names match the Series index
-        # for constr_name, new_coeff in sc_col.items():
-        #     # Find the Gurobi constraint object by its name
-        #     constr = self.model.getConstrByName(constr_name)
-        #     if constr:
-        #         updates.append((constr, r_var, new_coeff))
-        
-        # 3. Perform the bulk coefficient change
-        # This is much faster than repeated model.chgCoeff() calls in a loop.
-        
-        # # 1. Get the list of constraints
-        # m_constrs = self.model.getConstrs()
-
-        # # 2. Extract the new coefficients in the correct order
-        # # Assuming sc_col is indexed by constraint names (e.g., 'c_1', 'c_2')
-        # # new_coeffs = sc_col.to_list()
-        # new_coeffs = sc_col.iloc[self.customer_index].to_list()
-
-        # # # 3. Create a new Column object with the constraints and their new coefficients
-        # # new_column = Column(new_coeffs, m_constrs)
-
-        # # var_obj = 1e10 if self.col_contains_forbidden_arc(sc_col,self.convert_forbidden_links(_forbidden_arcs)) else r_var.obj
-
-        # # # 4. Use the model's addVar method to update the existing variable's column
-        # # # The variable must already exist in the model
-        # # self.model.addVar(obj=var_obj, lb=r_var.lb, ub=r_var.ub, vtype=r_var.vtype,
-        # #                 name=r_var.varName, column=new_column)
 
     def col_contains_forbidden_arc(self, sc_col,_forbidden_arcs) -> bool:
         """
@@ -577,7 +545,6 @@ class timeWindowModel:
                         _innerLog = inner_dict.copy()
                         P = PList[idx];bestState = bestStateList[idx]
                         reward = bestState[5]
-#                         print(bestState,P)
                         ## Filtering columns
                         if (reward>0.00001) and (bestState[0]>0):
                             dual_r = sum([self.getDuals()[i-1] for i in P[1:-1]]) #count repeat visits
@@ -714,7 +681,6 @@ class timeWindowModel:
         ref_df = self.init_routes_df.set_index('labels')
         _col = ref_df.loc[:][_route_name]
         _mr = _col['m']
-        # node_seq = pd.Series(_col[self.customer_index][_col>=0.7].index)
         node_seq = pd.Series(_col.iloc[self.customer_index][_col>=0.7].index)
         _qr = sum([self.customer_demand[c] for c in node_seq])
         _lr = _col['lr']

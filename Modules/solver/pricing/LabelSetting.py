@@ -28,7 +28,7 @@ class LabelSetting(ABC):
         pass
 
     @abstractmethod
-    def _check_dominance(self, new_label: Any):
+    def _check_dominance(self, new_label: Any) -> bool:
         """
         A helper method to check and apply dominance rules.
 

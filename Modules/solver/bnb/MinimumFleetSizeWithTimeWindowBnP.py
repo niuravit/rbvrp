@@ -32,6 +32,7 @@ class MinimumFleetSizeWithTimeWindowBnP(pybnb.Problem):
         self.b_cond_log = []; self.del_pats = []
         self.lp_sol = None
         self.loc_bound = None
+        self.name = f"MFS_TW"
         # Root node rmp
         self.rmp_initializer_model = md.timeWindowModel(_init_route, _initializer,
              _dist_mat,_const_dict, _relax_route=True)
@@ -75,14 +76,12 @@ class MinimumFleetSizeWithTimeWindowBnP(pybnb.Problem):
     
     def objective(self):
         if (self.loc_bound < 1e10) and (self.loc_bound > -1e10):
-            # lp_obj = sum([p.Obj*self.lp_sol[p.varName] for p in self.rmp_model.getVars()] )
             lp_obj = sum([p.Obj*p.x for p in self.lp_sol.values()])
             temp_m_ip_bound = self.rmp_initializer_model
             temp_m_ip_bound.model = self.rmp_model.copy()
             temp_m_ip_bound.shortCuttingColumns()
             temp_m_ip_bound.model.update()
             temp_m_ip_bound.solveModel()
-#             ip_obj = sum([p.Obj for p in temp_m_ip_bound.relaxedBoundedModel.getVars() if p.X>0] )
             ip_obj = temp_m_ip_bound.model.ObjVal
             print("LP/IP:",lp_obj,ip_obj)
             p_vars = temp_m_ip_bound.model.getVars()
@@ -325,13 +324,7 @@ def SolveMinFleetWithTimeWindowNode(cTCCVRP_mt):
         if v.varName in _del_pats: 
             _tWLP_node.init_routes_df.loc[m_lab_idx,v.varName] = 1e10
             v.Obj = 1e10
-#             _route_pats.pop(v.varName)
-#     print("==Solving node, with braching conds list:",_b_cond_log)
-#     print("==Len Vars:",len(_tWLP_node.model.getVars()))
-#     print("==Del Pats:",_del_pats)
     _tWLP_node.model.update()
-#     print("DFAFTERDROP:",_tWLP_node.init_routes_df.columns)
-#     print("MODELVARS:",_tWLP_node.model.getVars())
     
     # check if model is infeasible
     # if so, return inf
@@ -357,7 +350,6 @@ def SolveMinFleetWithTimeWindowNode(cTCCVRP_mt):
             # _filtering_mode="BestRwdPerI",
             _bch_cond = _b_cond_log,_node_count_lab = str(_node_count))
     colGen_te = time.time()-t1
-    # _tWLP_node.shortCuttingColumns(forbidden_arcs = _tWLP_node.forbid_link_dict)
     # update _route_pats & objval
     _tWLP_node.solveRelaxedBoundedModel()
     mrelax_obj = _tWLP_node.relaxedBoundedModel.ObjVal

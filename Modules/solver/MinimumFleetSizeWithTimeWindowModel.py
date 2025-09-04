@@ -46,7 +46,13 @@ class MinimumFleetSizeWithTimeWindowModel(OptimizationModel):
                                               constant_dict,
                                               self.instance.distance_matrix)
         row_labels = ['lr','m']+depot+customers+arcs
-        init_route = initializer.generateInitDFV4wTimeWindow(row_labels, constant_dict)
+        # init_route = initializer.generateInitDFV4wTimeWindow(row_labels, constant_dict)
+        init_route = initializer.generateInitialRouteWithFleetSize(row_labels, 
+                                                                    n=len(labeling_dict['customers']),
+                                                                    tw=constant_dict.get('time_window', np.inf),
+                                                                    tw_factor=constant_dict.get("tw_factor", 1),
+                                                                    init_max_npr=constant_dict.get('init_max_nodes_proute', np.inf),
+                                                                    init_max_mpr=np.inf)
             
         # Call Branch and Price solver & solve!
         problem = MinimumFleetSizeWithTimeWindowBnP(
@@ -65,6 +71,7 @@ class MinimumFleetSizeWithTimeWindowModel(OptimizationModel):
         results = pybnb.solver.solve(problem, 
                                    log_filename=bnb_log_filename,
                                    comm=None, absolute_gap=1e-6,
+                                   node_limit=self.experiment_config.bnp_node_limit,
                                    time_limit=self.experiment_config.bnp_time_limit,
                                    log_interval_seconds=0.1,  # Log as frequently as possible
                                    log_new_incumbent=False)  # Don't wait for new incumbents to log

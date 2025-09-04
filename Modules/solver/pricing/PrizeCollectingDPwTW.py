@@ -38,8 +38,9 @@ class PrizeCollectingDPwTW(LabelSetting):
         self.bch_cond = _bch_cond
         self.forbid_link_dict = _forbid_link_dict
         self.necess_link_dict = _necess_link_dict
-        # self.storage = StateStorage()
+        self.storage = StateStorage()
         self.epsilon = 0 #1e-8
+        self.no_profitable_route_iteration_max_tolerance = 120
         for key, value in kwargs.items():
             setattr(self, key, value)
         
@@ -63,8 +64,8 @@ class PrizeCollectingDPwTW(LabelSetting):
         S = [[LabelTWModel(0, 0, 0, 0, 0, 0, False, False, 0, False)]] + [[] for x in range(self.n)]
             # [[Label(x + 1, np.inf, np.inf, np.inf, -np.inf, -np.inf, True, True, np.inf, False)] for x in range(self.n)]
         # Insert the initial label for the depot
-        # initial_label = LabelTWModel(0, 0, 0, 0, 0, 0, 0, False, 0, _counter, DominanceLabel.UNDEFINED)
-        # self.storage.insert_label(initial_label)
+        initial_label = LabelTWModel(0, 0, 0, 0, 0, 0, False, False, 0, False)
+        self.storage.insert_label(initial_label)
 
         tFlag = False
         _time = time.time()
@@ -73,20 +74,11 @@ class PrizeCollectingDPwTW(LabelSetting):
         
         while not tFlag:           
             for i in range(self.n + 1):
-                # Iterate over a copy to avoid issues with modification
-                # current_labels_at_i = list(self.storage.get_labels(i))
-                # for current_label in current_labels_at_i:
                 for w in range(len(S[i])):
                     exit_now, _neg_cost_counter, _time =  self.early_terminate_if_profitable_states_exist(_time, S, _neg_cost_counter)
-                    # exit_now, _neg_cost_counter, _time =  self.early_terminate_if_profitable_states_exist(_time, self.storage, _neg_cost_counter)
                     if exit_now: return S, (_counter, _rch_counter)
-                    # if exit_now: return self.storage.S, (_counter, _rch_counter)
-
                     current_label = S[i][w]
                     if (not current_label.reached_flg):
-                        # if (current_label.dominated):
-                        #     current_label.reached_flg = True
-                        #     continue
                         if current_label.stops >= self.stop_lim:
                             current_label.reached_flg = True
                         else:
@@ -130,12 +122,10 @@ class PrizeCollectingDPwTW(LabelSetting):
 
                 _temp = sorted(S[i], key=lambda x: (x.acc_demand, x.acc_length, -x.acc_duals))
                 S[i] = _temp
-            # _all_pc = all(all(label.reached_flg for label in self.storage.get_labels(i)) for i in range(self.n + 1))
-            # print(f"Reach counter: {_rch_counter}, States count:", self.log_state_types(self.storage.S))
-            # if _all_pc:
-            #     tFlag = True
+
             _all_pc = all(all(label.reached_flg for label in state) for state in S)
             print(f"Reach counter: {_rch_counter}, States count:",self.log_state_types(S))
+            print(f"Reach counter: {_rch_counter}, States count:",self.log_state_storage_types())
             if _all_pc:
                 tFlag = True
         # return self.storage.S, (_counter, _rch_counter)
@@ -168,7 +158,7 @@ class PrizeCollectingDPwTW(LabelSetting):
             
         # Increment counter and check for max attempts
         neg_cost_counter += 1
-        if neg_cost_counter >= 5:
+        if neg_cost_counter >= self.no_profitable_route_iteration_max_tolerance:
             return True, neg_cost_counter, cur_time
             
         # Reset timer and continue
@@ -193,6 +183,19 @@ class PrizeCollectingDPwTW(LabelSetting):
         # all_labels = [label for sublist in S.values() for label in sublist]
         # counter = Counter(label.dominance_label for label in all_labels)
         
+        return {
+            "total_states": len(all_labels),
+            "strongly_dominant": counter[DominanceLabel.STRONGLY_DOMINANT],
+            "semistrongly_dominant": counter[DominanceLabel.SEMISTRONGLY_DOMINANT],
+            "weakly_dominant": counter[DominanceLabel.WEAKLY_DOMINANT],
+            "undefined": counter[DominanceLabel.UNDEFINED]
+        }
+    
+    def log_state_storage_types(self):    
+        all_labels = [label for sublist in self.storage.S.values() for label in sublist]
+        counter = Counter(label.dominance_label for label in all_labels)
+        # all_labels = [label for sublist in S.values() for label in sublist]
+        # counter = Counter(label.dominance_label for label in all_labels)
         
         return {
             "total_states": len(all_labels),
@@ -277,8 +280,7 @@ class PrizeCollectingDPwTW(LabelSetting):
     def _filter_out_dominated_states(self, new_label: LabelTWModel, S: List[List[LabelTWModel]]):
         i = new_label.i
         is_dominated = False
-
-        keep_as_weekly_dominant = False
+        keep_as_weakly_dominant = False
         dominated_by_semi_strongly_prevN_collect = set()
         dominated_by_semi_strongly_labels = []
         dominated_old_labels = []
@@ -307,17 +309,18 @@ class PrizeCollectingDPwTW(LabelSetting):
                             else: 
                                 dominated_by_semi_strongly_prevN_collect.add(current_label.prevN)
                                 dominated_by_semi_strongly_labels.append(current_label)
-                                keep_as_weekly_dominant = True # this means there exists current SEMISTRONGLY_DOMINANT label that new label can extend to its prevN
+                                keep_as_weakly_dominant = True # this means there exists current SEMISTRONGLY_DOMINANT label that new label can extend to its prevN
         
-        if (keep_as_weekly_dominant):
+        if (keep_as_weakly_dominant):
             if (len(dominated_by_semi_strongly_prevN_collect) >= 2):
-                keep_as_weekly_dominant = True # (2c)
+                keep_as_weakly_dominant = True # (2c)
             else: 
                 # add new label as weakly dominant
                 if dominated_by_semi_strongly_labels[0].prevN!=0: # prevent reaching to 0
                     new_label.dominance_label = DominanceLabel.WEAKLY_DOMINANT
                     new_label.force_extend.append(dominated_by_semi_strongly_labels[0].prevN)
                     S[i].append(new_label)
+                    self.storage.insert_label(new_label)
                 else: pass
 
         if not is_dominated:
@@ -330,85 +333,17 @@ class PrizeCollectingDPwTW(LabelSetting):
                         old_label.force_extend.append(new_label.prevN)
                     else:
                         S[i].remove(old_label)
-                        if (new_label.prevN ==0): 
+                        self.storage.remove_label(old_label)
+                        if (new_label.prevN == 0 ): 
                             pass
             elif (new_label.dominance_label == DominanceLabel.STRONGLY_DOMINANT):
                 # discard all dominated old labels
                 for old_label in dominated_old_labels:
                     S[i].remove(old_label)
+                    self.storage.remove_label(old_label)
             else: raise Exception("New label must be either strongly or semi-strongly dominant if not dominated.")
             S[i].append(new_label)
-
-    # def _check_dominance(self, new_label: LabelTWModel):
-    #     if self.domVer == 4:
-    #         self._filter_out_dominated_states(new_label)
-    #     else:
-    #         raise ValueError("Invalid dominance version.")
-
-    # def _check_dominance_ver4(self, state_a: LabelTWModel, state_b: LabelTWModel) -> bool:
-    #     if ( (state_a.acc_demand <= state_b.acc_demand + self.epsilon) and
-    #         (state_a.acc_length <= state_b.acc_length + self.epsilon) and
-    #         (state_a.acc_duals - state_b.acc_duals >= -self.epsilon) ):
-    #         return True
-    #     return False
-    
-    # def _filter_out_dominated_states(self, new_label: LabelTWModel):
-    #     i = new_label.i
-    #     is_dominated = False
-    #     keep_as_weakly_dominant = False
-    #     dominated_by_semi_strongly_prevN_collect = set()
-    #     dominated_by_semi_strongly_labels = []
-    #     dominated_old_labels = []
-
-    #     # Get the labels at the current node from the storage
-    #     current_labels = self.storage.get_labels(i)
-
-    #     if len(current_labels) > 0: 
-    #         for w in range(len(current_labels) - 1, -1, -1):
-    #             current_label = current_labels[w]
-    #             # Check for dominance of existing label by the new one
-    #             if self._check_dominance_ver4(new_label, current_label):
-    #                 dominated_old_labels.append(current_label)
-    #             # Check for dominance of the new label by an existing one
-    #             elif self._check_dominance_ver4(current_label, new_label):
-    #                 is_dominated = True
-    #                 if current_label.dominance_label in [DominanceLabel.STRONGLY_DOMINANT, DominanceLabel.WEAKLY_DOMINANT]:
-    #                     continue
-    #                 elif current_label.dominance_label == DominanceLabel.SEMISTRONGLY_DOMINANT:
-    #                     if current_label.prevN == new_label.prevN:
-    #                         continue
-    #                     elif current_label.prevN != new_label.prevN:
-    #                         if (new_label.acc_length + self.C.get((new_label.i, current_label.prevN), np.inf) > self.time_window):
-    #                             continue
-    #                         else: 
-    #                             dominated_by_semi_strongly_prevN_collect.add(current_label.prevN)
-    #                             dominated_by_semi_strongly_labels.append(current_label)
-    #                             keep_as_weekly_dominant = True
-        
-    #     if keep_as_weakly_dominant:
-    #         if len(dominated_by_semi_strongly_prevN_collect) >= 2:
-    #             pass
-    #         else: 
-    #             new_label.dominance_label = DominanceLabel.WEAKLY_DOMINANT
-    #             new_label.force_extend.append(dominated_by_semi_strongly_labels[0].prevN)
-    #             self.storage.insert_label(new_label)
-        
-    #     if not is_dominated:
-    #         self.get_dominant_type(new_label)
-    #         if new_label.dominance_label == DominanceLabel.SEMISTRONGLY_DOMINANT:
-    #             for old_label in dominated_old_labels:
-    #                 if old_label.prevN != new_label.prevN:
-    #                     old_label.dominance_label = DominanceLabel.WEAKLY_DOMINANT
-    #                     old_label.force_extend.append(new_label.prevN)
-    #                 else:
-    #                     self.storage.remove_label(old_label)
-    #         elif new_label.dominance_label == DominanceLabel.STRONGLY_DOMINANT:
-    #             for old_label in dominated_old_labels:
-    #                 self.storage.remove_label(old_label)
-    #         else:
-    #             raise Exception("New label must be either strongly or semi-strongly dominant if not dominated.")
-    #         self.storage.insert_label(new_label)
-            
+            self.storage.insert_label(new_label)
 
     def get_dominant_type(self, label: LabelTWModel):
         # label is not feasible to perform 2-cycle
