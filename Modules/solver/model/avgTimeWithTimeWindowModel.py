@@ -685,7 +685,7 @@ class avgTimeWithTimeWindowModel:
                                   'Route:',P,
                                   'RouteCost:',f"{route_cost}",
                                   'm_r:',f"{bestState[4]}",
-                                  'Reward:',np.round(reward,4))
+                                  'Reward:',np.round(reward,6))
                                 self.DPRouteDict[name] = prx_route
                                 # nCol
                                 for idx in col_coeff:

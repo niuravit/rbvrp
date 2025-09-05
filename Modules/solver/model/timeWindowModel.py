@@ -546,7 +546,7 @@ class timeWindowModel:
                         P = PList[idx];bestState = bestStateList[idx]
                         reward = bestState[5]
                         ## Filtering columns
-                        if (reward>0.00001) and (bestState[0]>0):
+                        if (reward>0.000001) and (bestState[0]>0):
                             dual_r = sum([self.getDuals()[i-1] for i in P[1:-1]]) #count repeat visits
                             route_cost = int(round(-reward+dual_r)) #or we can use m from DP?
                             prx_route = ['O']+['c_%s'%(x) for x in P[1:-1]]+['O']
@@ -566,7 +566,7 @@ class timeWindowModel:
                                   'Route:',P,
                                 #   'col_coeff:',col_coeff,
                                   'RouteCost/DP_m:',f"{route_cost}/{bestState[4]}",
-                                  'Reward:',np.round(reward,4))
+                                  'Reward:',np.round(reward,6))
                             self.DPRouteDict[name] = prx_route
                             # nCol
                             for idx in col_coeff:

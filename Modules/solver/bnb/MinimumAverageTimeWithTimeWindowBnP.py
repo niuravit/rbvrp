@@ -366,8 +366,8 @@ def SolveMinAverageTimeSpentNode(cTCCVRP_mt):
     # if so, return inf
     _minAverageTimeLP_node.solveRelaxedBoundedModel()
     mrelax_obj = _minAverageTimeLP_node.relaxedBoundedModel.ObjVal
-    print("==Model's status:",_minAverageTimeLP_node.relaxedBoundedModel.status)
-    if (_minAverageTimeLP_node.relaxedBoundedModel.status != 2) or (mrelax_obj >= 1e9) or (_bch_conflict):
+    print("==Model's status:",_minAverageTimeLP_node.relaxedBoundedModel.status, " relaxedObj:", mrelax_obj)
+    if (_minAverageTimeLP_node.relaxedBoundedModel.status != 2) or (mrelax_obj >= 1e8) or (_bch_conflict):
         print("==Prunned by INFEASIBILITY, mrx_obj, bch_conflict:",mrelax_obj,_bch_conflict )
         return 1e10, None, None, None, None,_node_count
     

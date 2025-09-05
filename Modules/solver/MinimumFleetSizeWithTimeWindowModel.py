@@ -188,7 +188,7 @@ class MinimumFleetSizeWithTimeWindowModel(OptimizationModel):
         bnb_log['termCond'] = results.termination_condition
         bnb_log['upb'] = np.round(ip_obj,2)
         bnb_log['lwb'] = np.round(results.bound,6)
-        bnb_log['gap'] = results.absolute_gap
+        bnb_log['gap'] = np.round((ip_obj-results.bound)/results.bound, 4) #results.absolute_gap
         bnb_log['nodesExp'] = results.nodes
         bnb_log['wallTime'] = results.wall_time
         bnb_log['bnpTimeLim'] = self.experiment_config.bnp_time_limit

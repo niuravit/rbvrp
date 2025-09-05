@@ -266,7 +266,7 @@ class MinimumAverageTimeWithTimeWindowModel(OptimizationModel):
         if sol_phase==2:
             bnb_log['upb_in_min_per_pkg'] = self.get_obj_in_min_per_pkg(ip_obj)
             bnb_log['lwb_in_min_per_pkg'] = self.get_obj_in_min_per_pkg(results.bound)
-        bnb_log['gap'] = results.absolute_gap
+        bnb_log['gap'] = np.round((ip_obj-results.bound)/results.bound, 4) #results.absolute_gap
         bnb_log['nodesExp'] = results.nodes
         bnb_log['wallTime'] = results.wall_time
         bnb_log['bnpTimeLim'] = self.experiment_config.bnp_time_limit
