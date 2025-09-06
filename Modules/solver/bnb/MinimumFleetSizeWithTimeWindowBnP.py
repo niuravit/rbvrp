@@ -360,7 +360,6 @@ def SolveMinFleetWithTimeWindowNode(cTCCVRP_mt):
     # else: 
     print("==THIS IS NODE:",_node_count)
     
-    
     print("LP-ColGen OBJ:",mrelax_obj)
     cTCCVRP_mt.save_lp_file(model = _tWLP_node.relaxedBoundedModel,
                             fname = f"twRelaxModel-node{_node_count}.lp")

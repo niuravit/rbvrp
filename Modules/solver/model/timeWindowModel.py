@@ -630,8 +630,6 @@ class timeWindowModel:
         forbid_link = [bh[0] for bh in _bch_cond if (bh[1] == 0)]
         necess_link = [bh[0] for bh in _bch_cond if (bh[1] == 1)]
         
-        
-        
         # Helper to parse node labels from strings like 'c_5' or 'O'
         def parse_node(node_str: str) -> int:
             if node_str == 'O':

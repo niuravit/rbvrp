@@ -202,10 +202,9 @@ class MinimumAverageTimeWithTimeWindowBnP(pybnb.Problem):
             route_dict = dict(); arc_score_dict = dict();
             frac_dict = dict(); route_incident_dict = dict();
             r_w_cycle = []
-#             for arc in self.arcs_drp_org:
+            # building arc score dict to select arc to branch
             for arc in self.arcs:
                 val = 0
-#                 if arc not in _not_bch_arcs:
                 for r_name, r_dict in _route_pats.items():     
                     if (arc in r_dict.keys()) and (_lp_sol[r_name]>0) and (arc not in _not_bch_arcs):
 #                             print(r_dict[arc],_lp_sol[r_name])
@@ -215,15 +214,10 @@ class MinimumAverageTimeWithTimeWindowBnP(pybnb.Problem):
                             # route contains cycle visiting arc > 1
                             if (r_dict[arc]>1) and (r_name not in r_w_cycle): 
                                 r_w_cycle.append(r_name)
-#                         arc_score_dict[arc] = val
                         arc_score_dict[arc] = np.abs(0.5-val)
                 if (abs(val - np.floor(val)) > epsilon) and (val!=1):
-                    frac_dict[arc] = np.abs(0.5-val)
-#                     frac_dict[arc] = val
-#                 if val!=1:
-#                     gap = abs(val - np.floor(val))
-#                     if "O" in arc: frac_dict[arc] = val
-#                     else: frac_dict[arc] = val
+                    # frac_dict[arc] = np.abs(0.5-val)
+                    frac_dict[arc] = val - np.floor(val) # fractional portion as score
 
             bch_arcs_dict = dict(); bch_arcs=[]
             print("r_w_cycle",r_w_cycle)
@@ -242,7 +236,7 @@ class MinimumAverageTimeWithTimeWindowBnP(pybnb.Problem):
                             if (i=="O") and (incident_dict[j]>1): bch_arcs += [(arc)]
                             elif (j=="O") and (incident_dict[i]>1): bch_arcs += [(arc)]
                             elif (incident_dict[i]>1 or incident_dict[j]>1): bch_arcs += [(arc)]
-#                     print("r_name",r_name, "Incident-dict",incident_dict)
+                    print("r_name",r_name, "Incident-dict",incident_dict)
 #                 for r_name in r_w_cycle:
 #                     bch_arcs += _route_pats[r_name].keys()
                 print("bch_arcs",bch_arcs)
@@ -254,10 +248,8 @@ class MinimumAverageTimeWithTimeWindowBnP(pybnb.Problem):
                 print("bch_arcs_dict",bch_arcs_dict)
                 if len(bch_arcs_dict.keys())>0:
                     frac = max(bch_arcs_dict, key = bch_arcs_dict.get)
-#                     frac = random.choice(list(bch_arcs_dict.keys()))
                 else:
                     frac = max(frac_dict, key = frac_dict.get)
-#                     frac = random.choice(list(frac_dict.keys()))
             elif (len(frac_dict.keys())>0):
                 frac = max(frac_dict, key = frac_dict.get)
             
@@ -359,7 +351,6 @@ def SolveMinAverageTimeSpentNode(cTCCVRP_mt):
         if v.varName in _del_pats: 
             # _minAverageTimeLP_node.init_routes_df.loc[m_lab_idx,v.varName] = 1e10
             v.Obj = 1e10
-
     _minAverageTimeLP_node.model.update()
     
     # check if model is infeasible
@@ -392,13 +383,9 @@ def SolveMinAverageTimeSpentNode(cTCCVRP_mt):
     print("LP-ColGen OBJ:",_minAverageTimeLP_node.relaxedBoundedModel.ObjVal)
     cTCCVRP_mt.save_lp_file(model = _minAverageTimeLP_node.relaxedBoundedModel,
                             fname = f"matRelaxModel-node{_node_count}")
-    _minAverageTimeLP_node.init_routes_df.to_csv(f"{cTCCVRP_mt.solution_directory}/route_df-node{_node_count}.csv")
-    print("ModelVars, DataFrameVars :", len(p_vars),len(_minAverageTimeLP_node.init_routes_df.columns)-1)
+    # _minAverageTimeLP_node.init_routes_df.to_csv(f"{cTCCVRP_mt.solution_directory}/route_df-node{_node_count}.csv")
+    # print("ModelVars, DataFrameVars :", len(p_vars),len(_minAverageTimeLP_node.init_routes_df.columns)-1)
     _route_pats = get_route_patterns(p_vars, _minAverageTimeLP_node.init_routes_df, cTCCVRP_mt.arcs_index)
-    # _route_pats = dict( [ (p.varName ,   dict( [(cTCCVRP_mt.label[a_idx], _minAverageTimeLP_node.init_routes_df[p.varName][a_idx])
-    #                                                 for a_idx in cTCCVRP_mt.arcs_index 
-    #                                                     if _minAverageTimeLP_node.init_routes_df[p.varName][a_idx]>0] )
-    #                           ) for p in p_vars ] )
     print("==Obj-val colgen:", mrelax_obj)
     print("==Branching Condition:", _b_cond_log)
     print([[p.varName, p.x, _route_pats[p.varName]] for p in p_vars if p.x >0])

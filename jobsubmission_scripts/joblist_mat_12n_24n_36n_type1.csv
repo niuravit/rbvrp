@@ -21,7 +21,7 @@ b24-9_mf,gts-ae58,inferno,rpichayavet3@gatech.edu,1,24,4,10800,instance_config_b
 b24-10_mf,gts-ae58,inferno,rpichayavet3@gatech.edu,1,24,4,10800,instance_config_b24-10.json,experiment_config_2h_model2.json,vis_config1.json
 b36-1_mf,gts-ae58,inferno,rpichayavet3@gatech.edu,1,24,4,28800,instance_config_b36-1.json,experiment_config_5h_model2.json,vis_config1.json
 b36-2_mf,gts-ae58,inferno,rpichayavet3@gatech.edu,1,24,4,28800,instance_config_b36-2.json,experiment_config_5h_model2.json,vis_config1.json
-b36-3_mf,gts-ae58,inferno,rpichayavet3@gatech.edu,1,24,4,28800,instance_config_b36-3.json,experiment_config_5h_model2.json,vis_config1.json
+b36-3_mf,gts-ae58,inferno,rpichayavet3@gatech.edu,1,24,4,36000,instance_config_b36-3.json,experiment_config_5h_model2.json,vis_config1.json
 b36-4_mf,gts-ae58,inferno,rpichayavet3@gatech.edu,1,24,4,28800,instance_config_b36-4.json,experiment_config_5h_model2.json,vis_config1.json
 b36-5_mf,gts-ae58,inferno,rpichayavet3@gatech.edu,1,24,4,28800,instance_config_b36-5.json,experiment_config_5h_model2.json,vis_config1.json
 b36-6_mf,gts-ae58,inferno,rpichayavet3@gatech.edu,1,24,4,28800,instance_config_b36-6.json,experiment_config_5h_model2.json,vis_config1.json

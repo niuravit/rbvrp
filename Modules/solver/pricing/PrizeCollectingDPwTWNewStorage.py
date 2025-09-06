@@ -73,7 +73,6 @@ class PrizeCollectingDPwTWNewStorage(LabelSetting):
         tFlag = False
         _time = time.time()
         _neg_cost_counter = 0
-        _l_threshold = self.time_window - (self.veh_cap / (self.stop_lim * max(self.Q)))
         
         while not tFlag:           
             # for i in range(self.n + 1):
