@@ -19,8 +19,9 @@ class PrizeCollectingDPwMATNewStorage(LabelSetting):
     def __init__(self, _n: int, _C: Dict, _Q: List, _dual: np.ndarray,
                  _s0: float, _veh_cap: float, _time_window: float, _wavg_factor: float,
                  _m_lim: int, _dom_ver: int, _total_fleet_size: int,
-                 _time_limit: int = np.inf, _stop_lim: int = np.inf, _ch_dom: bool = True, 
-                 _bch_cond: List = [], 
+                 _dp_time_limit: int = np.inf, _global_time_remain: int = np.inf, 
+                 _stop_lim: int = np.inf, _ch_dom: bool = True,
+                 _bch_cond: List = [],
                  _forbid_link_dict: Dict[int, List[int]] = {},
                  _necess_link_dict: Dict[int, List[int]] = {},            
                  **kwargs):
@@ -37,7 +38,8 @@ class PrizeCollectingDPwMATNewStorage(LabelSetting):
         self.m_lim = _m_lim
         self.total_fleet_size = _total_fleet_size
         self.domVer = _dom_ver
-        self.time_limit = _time_limit
+        self.dp_time_limit = _dp_time_limit
+        self.global_time_remain = _global_time_remain
         self.stop_lim = _stop_lim
         self.ch_dom = _ch_dom
         self.bch_cond = _bch_cond
@@ -46,11 +48,12 @@ class PrizeCollectingDPwMATNewStorage(LabelSetting):
         self.storage = StateStorage()
         self.epsilon = 0 #1e-8
         self.no_profitable_route_iteration_max_tolerance = 120
+        self.time_limit = self.global_time_remain
         for key, value in kwargs.items():
             setattr(self, key, value)
         
     def solve(self) -> Tuple[Dict[int, List[LabelMATModel]], Tuple[int, int]]:        
-        print('Solving time limit set to:', self.time_limit, 'secs.', "Dominance Checking:", self.ch_dom)
+        print('Solving time limit set to:', self.time_limit, 'secs.', f"DP time limit {self.dp_time_limit}, Global time remaining: {self.global_time_remain} secs.", "Dominance Checking:", self.ch_dom)
         if self.ch_dom:
             if self.domVer not in [2, 3, 4]:
                 print("Wrong input of dominance version! _domVer should be in", [2, 3, 4])
@@ -74,6 +77,7 @@ class PrizeCollectingDPwMATNewStorage(LabelSetting):
 
         tFlag = False
         _time = time.time()
+        _dp_time_check = time.time()
         _neg_cost_counter = 0
 
         while not tFlag:
@@ -83,65 +87,63 @@ class PrizeCollectingDPwMATNewStorage(LabelSetting):
 
             if not process_queue.empty():
                 _, _, _, counter, current_label = process_queue.get()
-                if True:
-
-                    exit_now, _neg_cost_counter, _time =  self.early_terminate_if_profitable_states_exist(_time, self.storage, _neg_cost_counter)
-                    if exit_now: return self.storage.S, (_counter, _rch_counter)
-                    if (not current_label.reached_flg) and (not current_label.dominated):
-                        if current_label.stops >= self.stop_lim:
-                            current_label.reached_flg = True
-                        else:
-                            i = current_label.i
-                            if (current_label.dominance_label == DominanceLabel.WEAKLY_DOMINANT):
-                                reachTo = [
-                                    x for x in current_label.force_extend if (x != i) 
-                                    and (x not in self.forbid_link_dict[i]) 
-                                    and (x != current_label.prevN)
-                                    ]
-                            else:
-                                reachTo = [
-                                    x for x in range(1, self.n + 1)
-                                    if (x != i) and (x not in self.forbid_link_dict[i]) and (x != current_label.prevN)
+                exit_now, _neg_cost_counter, _dp_time_check =  self.early_terminate_if_profitable_states_exist(_time,_dp_time_check, self.storage, _neg_cost_counter)
+                if exit_now: return self.storage.S, (_counter, _rch_counter)
+                if (not current_label.reached_flg) and (not current_label.dominated):
+                    if current_label.stops >= self.stop_lim:
+                        current_label.reached_flg = True
+                    else:
+                        i = current_label.i
+                        if (current_label.dominance_label == DominanceLabel.WEAKLY_DOMINANT):
+                            reachTo = [
+                                x for x in current_label.force_extend if (x != i) 
+                                and (x not in self.forbid_link_dict[i]) 
+                                and (x != current_label.prevN)
                                 ]
-                            current_label.reached_flg = True
-                            
-                            for j in reachTo:
-                                _rch_counter += 1
-                                _d = current_label.acc_demand + self.Q[j]
-                                _l = current_label.acc_length + self.C[(i, j)]
-                                _p = current_label.stops + 1
-                                # new state must satisfy time window and fleet size constraint
-                                if ((self.time_window - _l) > 0):
-                                    m_ctc = np.ceil((_d * (_l + self.C[(j, 0)])) / self.veh_cap)
-                                    m_tw = np.ceil((_l + self.C[(j, 0)]) / (self.time_window - _l))
-                                    m_opt = self.get_optimal_m_for_state(self.total_fleet_size, _d, _l+self.C[(j, 0)], self.mu)
-                                    m_opt_eff = m_opt if m_opt >= max(m_ctc, m_tw) else max(m_ctc, m_tw)
+                        else:
+                            reachTo = [
+                                x for x in range(1, self.n + 1)
+                                if (x != i) and (x not in self.forbid_link_dict[i]) and (x != current_label.prevN)
+                            ]
+                        current_label.reached_flg = True
+                        
+                        for j in reachTo:
+                            _rch_counter += 1
+                            _d = current_label.acc_demand + self.Q[j]
+                            _l = current_label.acc_length + self.C[(i, j)]
+                            _p = current_label.stops + 1
+                            # new state must satisfy time window and fleet size constraint
+                            if ((self.time_window - _l) > 0):
+                                m_ctc = np.ceil((_d * (_l + self.C[(j, 0)])) / self.veh_cap)
+                                m_tw = np.ceil((_l + self.C[(j, 0)]) / (self.time_window - _l))
+                                m_opt = self.get_optimal_m_for_state(self.total_fleet_size, _d, _l+self.C[(j, 0)], self.mu)
+                                m_opt_eff = m_opt if m_opt >= max(m_ctc, m_tw) else max(m_ctc, m_tw)
 
-                                    if (m_opt_eff > self.total_fleet_size): 
-                                        continue # this means the new state exceeds the total fleet size constraint
-                                    else:
-                                        # new state is feasible
-                                        _rwd = current_label.reward + self.get_transition_reward(current_label, j, m_opt_eff)
-                                        _dual = current_label.acc_duals + self.dual[j - 1]
-                                        
-                                        if m_opt_eff <= self.m_lim:
-                                            _counter += 1
-                                            _h_m_opt = self.h_func(m_opt_eff, _d, _l + self.C[(j, 0)], self.mu)
-                                            new_label = LabelMATModel(j, _d, _l, _dual, _p, m_opt_eff, _rwd, _h_m_opt, False, i, _counter, DominanceLabel.UNDEFINED)
-                                            if self.ch_dom:
-                                                is_dominated = self._check_dominance(new_label)
-                                                if not is_dominated:
-                                                    # Negate priorities for max-heap behavior
-                                                    priorities = self.get_label_priority(new_label)
-                                                    process_queue.put(
-                                                        (-priorities[0],      # Resource score (higher better)
-                                                        -priorities[1],      # Reward efficiency (higher better)
-                                                        -priorities[2],      # Path quality (higher better)
-                                                        new_label.counter,   # Unique ID for tie-breaking
-                                                        new_label)
-                                                    )
-                                            else:
-                                                self.storage.insert_label(new_label)
+                                if (m_opt_eff > self.total_fleet_size): 
+                                    continue # this means the new state exceeds the total fleet size constraint
+                                else:
+                                    # new state is feasible
+                                    _rwd = current_label.reward + self.get_transition_reward(current_label, j, m_opt_eff)
+                                    _dual = current_label.acc_duals + self.dual[j - 1]
+                                    
+                                    if m_opt_eff <= self.m_lim:
+                                        _counter += 1
+                                        _h_m_opt = self.h_func(m_opt_eff, _d, _l + self.C[(j, 0)], self.mu)
+                                        new_label = LabelMATModel(j, _d, _l, _dual, _p, m_opt_eff, _rwd, _h_m_opt, False, i, _counter, DominanceLabel.UNDEFINED)
+                                        if self.ch_dom:
+                                            is_dominated = self._check_dominance(new_label)
+                                            if not is_dominated:
+                                                # Negate priorities for max-heap behavior
+                                                priorities = self.get_label_priority(new_label)
+                                                process_queue.put(
+                                                    (-priorities[0],      # Resource score (higher better)
+                                                    -priorities[1],      # Reward efficiency (higher better)
+                                                    -priorities[2],      # Path quality (higher better)
+                                                    new_label.counter,   # Unique ID for tie-breaking
+                                                    new_label)
+                                                )
+                                        else:
+                                            self.storage.insert_label(new_label)
                                             
             _all_pc = all(all(label.reached_flg for label in self.storage.get_labels(i)) for i in range(self.n + 1))
             if _rch_counter%200==0:
@@ -194,7 +196,7 @@ class PrizeCollectingDPwMATNewStorage(LabelSetting):
         else:
             return 0
 
-    def early_terminate_if_profitable_states_exist(self, cur_time: float, storage: StateStorage, neg_cost_counter: int) -> Tuple[bool, int, float]:
+    def early_terminate_if_profitable_states_exist(self, started_time: float,prev_check_time: float, storage: StateStorage, neg_cost_counter: int) -> Tuple[bool, int, float]:
     # def early_terminate_if_profitable_states_exist(self, cur_time: float, S: List[List[LabelTWModel]], neg_cost_counter: int) -> Tuple[bool, int, float]:
         """
         Check if we should terminate early based on time limit and profitable states.
@@ -207,29 +209,35 @@ class PrizeCollectingDPwMATNewStorage(LabelSetting):
         Returns:
             Tuple of (should_terminate: bool, updated_counter: int, updated_time: float)
         """
-        elapsed_time = time.time() - cur_time
-        if elapsed_time <= self.time_limit:
-            return False, neg_cost_counter, cur_time
-            
-        print(f'Reach time limit!! {elapsed_time:.2f}/{self.time_limit}')
-        
-        # Check for profitable states (reward > epsilon)
-        if any(label.reward > 0.000001 for sublist in storage.S.values() for label in sublist):
-            return True, neg_cost_counter, cur_time
-        # if any(label.reward > 0.000001 for sublist in S for label in sublist):
-        #     return True, neg_cost_counter, cur_time
-            
-        # Increment counter and check for max attempts
-        neg_cost_counter += 1
-        if neg_cost_counter >= self.no_profitable_route_iteration_max_tolerance:
-            return True, neg_cost_counter, cur_time
-            
-        # Reset timer and continue
-        # print(f'{neg_cost_counter}: No positive reduced cost found! Reset time & continue searching...',
-        #       f'states explored: {sum(len(x) for x in S)}')
-        print(f'{neg_cost_counter}: No positive reduced cost found! Reset time & continue searching...',
-              f'states explored: {sum(len(sublist) for sublist in storage.S.values())}')
-        return False, neg_cost_counter, time.time()
+        curr_time = time.time()
+        elapsed_time_from_prev_check = curr_time - prev_check_time
+        elapsed_time = curr_time - started_time
+        if elapsed_time > self.global_time_remain:
+            print(f'Exceed global time remaining {elapsed_time:.2f}/{self.global_time_remain}, terminate DP now!')
+            return True, neg_cost_counter, curr_time
+        else:
+            if elapsed_time_from_prev_check <= self.dp_time_limit:
+                return False, neg_cost_counter, prev_check_time
+
+            print(f'Reach dp time check limit!! {elapsed_time_from_prev_check:.2f}/{self.dp_time_limit}')
+
+            # Check for profitable states (reward > epsilon)
+            if any(label.reward > 0.000001 for sublist in storage.S.values() for label in sublist):
+                return True, neg_cost_counter,curr_time
+            # if any(label.reward > 0.000001 for sublist in S for label in sublist):
+            #     return True, neg_cost_counter, cur_time
+                
+            # Increment counter and check for max attempts
+            neg_cost_counter += 1
+            if neg_cost_counter >= self.no_profitable_route_iteration_max_tolerance:
+                return True, neg_cost_counter,curr_time
+                
+            # Reset timer and continue
+            # print(f'{neg_cost_counter}: No positive reduced cost found! Reset time & continue searching...',
+            #       f'states explored: {sum(len(x) for x in S)}')
+            print(f'{neg_cost_counter}: No positive reduced cost found! Reset time & continue searching...',
+                f'states explored: {sum(len(sublist) for sublist in storage.S.values())}')
+            return False, neg_cost_counter,curr_time
     
     def log_state_storage_types(self):    
         all_labels = [label for sublist in self.storage.S.values() for label in sublist]
