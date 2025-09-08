@@ -66,6 +66,7 @@ class MinimumAverageTimeWithTimeWindowModel(OptimizationModel):
                             constant_dict,
                             self.solution_directory,
                             _chDom = True, 
+                            time_limit=self.experiment_config.bnp_time_limit,
                             _dom_rule = 4)
         min_avg_time_problem.load_rmp_initial_model(warm_start_prob_inst.initializer, 
                                                     warm_start_prob_inst.root_node[3], 
