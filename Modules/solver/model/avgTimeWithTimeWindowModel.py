@@ -18,6 +18,7 @@ import os
 epsilon = 1e-5
 from typing import Dict, List, Any, Tuple, Optional
 from solver.model.RouteCost import RouteCost
+from solver.bnb.BranchingUtility import BranchingUtility
 
 class avgTimeWithTimeWindowModel:
     def __init__(self, _init_route, _initializer,
@@ -88,7 +89,8 @@ class avgTimeWithTimeWindowModel:
             customer_index=self.customer_index,
             arcs_index=self.arcs_index
         )
-            
+        self.branching_utility = BranchingUtility()
+
     def buildModel(self):
         self.generateVariables()
         self.generateConstraints()
@@ -432,7 +434,9 @@ class avgTimeWithTimeWindowModel:
 
     def runColumnsGeneration(self,_m_collections,_pricing_status=False,
                              _check_dominance=True,_dominance_rule=None,
-                             _DP_ver=None,_time_limit=None,_filtering_mode=None,
+                             _DP_ver=None,
+                             _dp_time_limit=None, _global_time_remain=None,
+                             _filtering_mode=None,
                             _bch_cond=None,_node_count_lab=None,_acc_flag=None):
         outer_dict = dict(zip(['Duals','Inner','ttTime','ttStates'],[[],[],[],[]]))
         inner_dict = dict(zip(['m','route','reward','#states','time'],[None,None,None,None,None]))
@@ -441,99 +445,7 @@ class avgTimeWithTimeWindowModel:
         else:
             print('.Running Col. Gen. with DP mode: ', _DP_ver, "Dom Rule:",_check_dominance,_dominance_rule )
             print('| Max nodes visited: %s'%self.max_nodes_proute_DP,'| Max vehicles per route: %s'%self.max_vehicles_proute_DP)
-            if (_DP_ver == "ITER_M"):
-                print("Dominance Checking:",_check_dominance,', rule:',_dominance_rule)
-                self.solveRelaxedModel()
-                duals_vect = pd.DataFrame(self.getDuals(), index = self.customers + ['m'])
-                opt_cond_vect = pd.Series(index = _m_collections,data=False)
-                out_loop_counter = 0
-                t1 = time.time()
-                iter_log = dict()
-                self.colgenLogs = dict()
-                iter_log['es_time'] = 0; iter_log['duals'] = duals_vect[0]; iter_log['cols_gen'] = 0;
-                iter_log['cols_add'] = 0; iter_log['max_stops'] = 0;
-                self.colgenLogs[out_loop_counter]=iter_log
-                self.feasibleStatesExplored = 0
-                _outerLogList = []
-                t1 = time.time()
-                while opt_cond_vect.sum()<len(_m_collections):
-                    iter_log = dict(); proc_list = [];
-                    iter_log['es_time'] = time.time()
-                    iter_log['cols_gen'] = 0; iter_log['cols_add'] = 0; iter_log['max_stops'] = 0
-                    _outerLog = outer_dict.copy()
-                    _innerLogList = []
-                    for _m_veh in _m_collections:
-                        _innerLog = inner_dict.copy()
-                        if _pricing_status:
-                            print('.Running Col. Gen. for m_r:', _m_veh,'| Max nodes visited: %s'%self.max_nodes_proute_DP, '| Out-loop-%s'%out_loop_counter)
-                        n = len(self.customers)
-                        Q = [0]+list(self.customer_demand.loc[self.customers].values)
-    #                     M = 3 #max m per route from collection of m
-                        print("\n DUALS:",self.getDuals())
-                        s0 = self.fixed_setup_time
-                        _inner_t = time.time()
-                        S,_st_counter = prizeCollectingDP(n,self.cost_matrix,Q,_m_veh,self.getDuals(),s0,
-                                                          _veh_cap=self.vehicle_capacity,
-                                              _chDom=_check_dominance,_stopLim=self.max_nodes_proute_DP)
-                        self.feasibleStatesExplored +=_st_counter[0]
-                        _inner_t = time.time()-_inner_t
-                        P,bestState = pathReconstruction(S,Q,self.cost_matrix)
-    #                     print(S);return P,bestState,S
-                        reward = bestState[4]
-                        ## Filtering columns
-                        if (reward>0.000001) and (bestState[0]>0):
-                            dual_r = sum([self.getDuals()[i-1] for i in P[1:-1]])
-                            route_cost = -reward+dual_r+_m_veh*self.getDuals()[-1]
-                            prx_route = ['O']+['c_%s'%(x) for x in P[1:-1]]+['O']
-                            arc_route = [(prx_route[i],prx_route[i+1]) for i in range(len(prx_route)-1)]
-                            col_coeff = prx_route+arc_route
-                            nCol = pd.DataFrame(self.init_routes_df.set_index('labels').index, columns=['labels'])
-                            prefix = str(_m_veh)+str(out_loop_counter)
-                            name = 'sDP_C%s-%s'%(prefix,bestState[7])
-                            nCol[name] = 0
-                            nCol.loc[nCol.labels=='m',name] = _m_veh
-                            nCol.loc[nCol.labels=='lr',name] = sum([self.distance_matrix[tup]/self.truck_speed for tup in arc_route])
-                            print(bestState,'M:',_m_veh)
-                            print('PrxRoute:',prx_route,'ArcRoute:',arc_route)
-                            print('Route:',P,'RouteCost:',route_cost,'Reward:',reward)
-                            self.DPRouteDict[name] = prx_route
-                            # nCol
-                            for idx in col_coeff:
-                                nCol.loc[nCol.labels==idx,name] +=1
-                            adColDf = pd.DataFrame(columns=['routeCost','colDF'])
-                            adColDf.loc[name,['routeCost']] =[route_cost]
-                            adColDf.loc[name,['colDF']] = [nCol]
-                            #Add columns
-    #                         return nCol,adColDf
-                            self.generateColumns(adColDf, duals_vect)
-                            iter_log['cols_add'] +=1
-                            _innerLog['m'] = _m_veh; _innerLog['route'] = P;_innerLog['reward'] = reward
-                            _innerLog['#states'] = _st_counter;_innerLog['time'] = _inner_t; 
-                            _innerLogList=_innerLogList+[_innerLog]
-                        else: 
-                            opt_cond_vect[_m_veh] = True
-                            _innerLog['m'] = _m_veh; _innerLog['#states'] = _st_counter
-                            _innerLog['time'] = _inner_t; _innerLogList=_innerLogList+[_innerLog]
-                            continue
-                        tt_states = sum([len(l) for l in S])
-                        iter_log['cols_gen'] += tt_states
-                    #Resolve relax model
-                    self.solveRelaxedModel()
-                    duals_vect = pd.DataFrame(self.getDuals(), index = self.customers + ['m'])
-                    out_loop_counter+=1
-                    iter_log['es_time'] = time.time()-iter_log['es_time']
-                    iter_log['duals'] = duals_vect[0]
-                    self.colgenLogs[out_loop_counter]=iter_log
-                    ######COMPARISON##########
-                    _outerLog['ttTime'] = sum([nn['time'] for nn in _innerLogList])
-                    _outerLog['ttStates'] = np.sum([nn['#states'] for nn in _innerLogList],axis=0)
-                    _outerLog['Duals'] = self.getDuals()
-                    _outerLog['Inner'] = _innerLogList
-                    _outerLogList = _outerLogList+[_outerLog]
-                self.colGenTe = time.time()-t1
-                self.colGenCompLog = _outerLogList
-                print('Col.Gen. Completed!...Elapsed-time:',self.colGenTe)
-            elif (_DP_ver == "SIMUL_M"):
+            if (_DP_ver == "SIMUL_M"):
                 self.solveRelaxedModel()
                 duals_vect = pd.DataFrame(self.getDuals(), index = self.customers + ['m'])
                 opt_cond = False; out_loop_counter = 0; iter_log = dict();self.colgenLogs = dict()
@@ -553,9 +465,8 @@ class avgTimeWithTimeWindowModel:
                     print("Primal bound:", primal_bound)
                     print("Dual bound:", dual_bound)
                     print("---------------------------------")
-                    
-#                     out_duals = np.array(self.getDuals())
-#                     conv_comb_duals = in_duals*(_acc_flag)+out_duals*(1-_acc_flag)
+                    out_duals = np.array(self.getDuals())
+                    conv_comb_duals = in_duals*(_acc_flag)+out_duals*(1-_acc_flag)
                     
                 while not(opt_cond):
                     iter_log = dict(); proc_list = [];
@@ -599,10 +510,10 @@ class avgTimeWithTimeWindowModel:
                     print("\n DUALS:",np.round(_duals, 4))
                     _inner_t = time.time()
 
-                    self.forbid_link_dict, self.necess_link_dict = self.parse_branching_conditions(_bch_cond)
+                    self.forbid_link_dict, self.necess_link_dict = self.branching_utility.parse_branching_conditions(self.n, _bch_cond)
                     solver = PrizeCollectingDPwMATNewStorage(
-                        _n=n, 
-                        _C=self.cost_matrix, 
+                        _n=n,
+                        _C=self.cost_matrix,
                         _Q=Q,
                         _dual=self.getDuals(), 
                         _s0=s0,
@@ -613,7 +524,8 @@ class avgTimeWithTimeWindowModel:
                         _total_fleet_size = self.constant_dict['total_fleet_size'],
                         _dom_ver=_dominance_rule,
                         _ch_dom =_check_dominance,
-                        _time_limit=_time_limit,
+                        _dp_time_limit=_dp_time_limit,
+                        _global_time_remain=_global_time_remain,
                         _stop_lim=self.constant_dict['max_nodes_proute_DP'],
                         _bch_cond=_bch_cond,
                         _forbid_link_dict=self.forbid_link_dict,
@@ -627,14 +539,14 @@ class avgTimeWithTimeWindowModel:
                     print('States explored in {0}-iters:{1}'.format(out_loop_counter,_st_counter))
                     print()
                     _inner_t = time.time()-_inner_t
+                    _global_time_remain -= _inner_t # update global time remains
                     PList,bestStateList = pathReconstructionTWVer2(S,Q,
                                             self.cost_matrix,_filtering_mode,
                                             self.max_vehicles_proute_DP,
                                             _bch_cond=_bch_cond)
                     rwdList = [((b[5]>0.000001) and (b[0]>0)) for b in bestStateList]
-                    print('RWDList:',rwdList) #,'BestStateList:',bestStateList)
+                    print('RWDList:',rwdList) 
                     _innerLogList=[]; 
-#                     print(bestStateList)
                     if _acc_flag is not None: 
                         if not(any(rwdList)): # Dual is feasible, so no improved route can be found!
                             # Update in-dual and dual-bound
@@ -652,16 +564,10 @@ class avgTimeWithTimeWindowModel:
                             pass
 #                             out_duals = _duals
                             # Then, add new columns and update the primal bound
-                            
-                            
                     else:
                         if not(any(rwdList)): 
                             opt_cond = True; 
-                            continue;
-                        # for idx in range(len(bestStateList)):
-                        #     _innerLog = inner_dict.copy()
-                        #     P = PList[idx];bestState = bestStateList[idx]
-                        #     reward = bestState[5]         
+                            continue;       
                         for idx in range(len(bestStateList)):
                             _innerLog = inner_dict.copy()
                             P = PList[idx];bestState = bestStateList[idx]
@@ -807,26 +713,6 @@ class avgTimeWithTimeWindowModel:
                             route_info_dict,route_info_topic_array,column_width,column_format]))
             reformatted_arcs += [route_plot_dict]
         return reformatted_arcs    
-
-#     def getRoute4Plot(self, _route_name_list, _colums_df,_route_config):
-#         reformatted_arcs=[]
-#         COLORLIST = ["#FE2712","#347C98","#FC600A",
-#                      "#66B032","#0247FE","#B2D732",
-#                     "#FB9902","#4424D6","#8601AF",
-#                     "#FCCC1A","#C21460","#FEFE33"]
-#         for j in range(len(_route_name_list)):
-#             idx = _route_name_list[j]
-#             col_idx = j%12
-# #             print(idx)
-#             curr_route_config = _route_config.copy()
-#             curr_route_config['line_color'] = COLORLIST[col_idx]
-#             sample_r = _colums_df.loc[:][idx]
-#             curr_route_config['name'] = idx+"-"+str(round(_colums_df.loc['m'][idx]))+"m"
-#             sample_arcs = sample_r[sample_r.index.isin(self.arcs)][sample_r==1]
-#             route_plot_dict = dict(zip(['arcs_list','config'],
-#                            [sample_arcs.index.to_list(),curr_route_config]))
-#             reformatted_arcs += [route_plot_dict]
-#         return reformatted_arcs
     
     def getRouteSolution(self,_model_vars,_edge_plot_config,_node_trace,_cus_dem):
         vars_value = pd.Series(_model_vars)
@@ -849,48 +735,3 @@ class avgTimeWithTimeWindowModel:
         formatted_routes_list =  self.getRoute4Plot(optimal_routes.index.to_list(),
                                                                 ref_df,_edge_plot_config)
         vis_sol.plot_network(formatted_routes_list,_node_trace,_title,_cus_dem)
-
-    def parse_branching_conditions(self, _bch_cond: List[Tuple[Tuple[str, str], int]]):
-        """Parses branching conditions into dictionaries of forbidden and necessary links."""
-        forbid_link_dict = {i: [] for i in range(self.n + 1)}
-        necess_link_dict = {i: [] for i in range(self.n + 1)}
-
-        if _bch_cond is None: 
-            return forbid_link_dict, necess_link_dict
-        
-        forbid_link = [bh[0] for bh in _bch_cond if (bh[1] == 0)]
-        necess_link = [bh[0] for bh in _bch_cond if (bh[1] == 1)]
-        
-        # Helper to parse node labels from strings like 'c_5' or 'O'
-        def parse_node(node_str: str) -> int:
-            if node_str == 'O':
-                return 0
-            return int(node_str.split("_")[-1])
-            
-        for arc in forbid_link:
-            i = parse_node(arc[0]); j = parse_node(arc[1])
-            forbid_link_dict[i].append(j)
-            
-        for arc in necess_link:
-            i = parse_node(arc[0]); j = parse_node(arc[1])
-            necess_link_dict[i].append(j)
-            
-            # Propagate necessary links to forbid others
-            if i == 0: # Necessary link from depot: other links from depot are forbidden
-                for k in range(self.n + 1):
-                    if k != j and k not in forbid_link_dict[i]:
-                        forbid_link_dict[i].append(k)
-            elif j == 0: # Necessary link to depot: other links to depot are forbidden
-                for k in range(self.n + 1):
-                    if k != i and j not in forbid_link_dict[k]:
-                        # TODO: check this logic
-                        forbid_link_dict[k].append(j)
-
-            else: # Necessary link between customers
-                for k in range(self.n + 1):
-                    if k != i and j not in forbid_link_dict[k]:
-                        forbid_link_dict[k].append(j) # No other path to j
-                    if k != j and k not in forbid_link_dict[i]:
-                        forbid_link_dict[i].append(k) # No other path from i
-                        
-        return forbid_link_dict, necess_link_dict

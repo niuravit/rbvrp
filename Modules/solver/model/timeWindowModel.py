@@ -18,6 +18,7 @@ import os
 epsilon = 1e-5
 from typing import Dict, List, Any, Tuple, Optional
 from solver.model.RouteCost import RouteCost
+from solver.bnb.BranchingUtility import BranchingUtility
 
 
 class timeWindowModel:
@@ -87,6 +88,7 @@ class timeWindowModel:
             customer_index=self.customer_index,
             arcs_index=self.arcs_index
         )
+        self.branching_utility = BranchingUtility()
             
     def buildModel(self):
         self.generateVariables()
@@ -502,7 +504,7 @@ class timeWindowModel:
                     #             _stopLim=self.max_nodes_proute_DP,
                     #             _time_limit=_time_limit,_heu_add_m=_heu_add_m,
                     #             _domVer=_dominance_rule)
-                    self.forbid_link_dict, self.necess_link_dict = self.parse_branching_conditions(_bch_cond)
+                    self.forbid_link_dict, self.necess_link_dict = self.branching_utility.parse_branching_conditions(self.n, _bch_cond)
                     # solver = PrizeCollectingDPwTW(
                     solver = PrizeCollectingDPwTWNewStorage(
                         _n=n, 
@@ -618,73 +620,6 @@ class timeWindowModel:
                 self.colGenTe = time.time()-t1
                 self.colGenCompLog = _outerLogList
                 print('Col.Gen. Completed!...Elapsed-time:',self.colGenTe)
-    
-    def parse_branching_conditions(self, _bch_cond: List[Tuple[Tuple[str, str], int]]):
-        """Parses branching conditions into dictionaries of forbidden and necessary links."""
-        forbid_link_dict = {i: [] for i in range(self.n + 1)}
-        necess_link_dict = {i: [] for i in range(self.n + 1)}
-
-        if _bch_cond is None: 
-            return forbid_link_dict, necess_link_dict
-        
-        forbid_link = [bh[0] for bh in _bch_cond if (bh[1] == 0)]
-        necess_link = [bh[0] for bh in _bch_cond if (bh[1] == 1)]
-        
-        # Helper to parse node labels from strings like 'c_5' or 'O'
-        def parse_node(node_str: str) -> int:
-            if node_str == 'O':
-                return 0
-            return int(node_str.split("_")[-1])
-            
-        for arc in forbid_link:
-            i = parse_node(arc[0]); j = parse_node(arc[1])
-            forbid_link_dict[i].append(j)
-            
-        for arc in necess_link:
-            i = parse_node(arc[0]); j = parse_node(arc[1])
-            necess_link_dict[i].append(j)
-            
-            # Propagate necessary links to forbid others
-            if i == 0: # Necessary link from depot: other links from depot are forbidden
-                for k in range(self.n + 1):
-                    if k != j and k not in forbid_link_dict[i]:
-                        forbid_link_dict[i].append(k)
-            elif j == 0: # Necessary link to depot: other links to depot are forbidden
-                for k in range(self.n + 1):
-                    if k != i and j not in forbid_link_dict[k]:
-                        forbid_link_dict[k].append(j)
-            else: # Necessary link between customers
-                for k in range(self.n + 1):
-                    if k != i and j not in forbid_link_dict[k]:
-                        forbid_link_dict[k].append(j) # No other path to j
-                    if k != j and k not in forbid_link_dict[i]:
-                        forbid_link_dict[i].append(k) # No other path from i
-                        
-        return forbid_link_dict, necess_link_dict
-        
-    # def calculateAverageRemainingSpace(self,_model_vars,):
-    #     vars_value = pd.Series(_model_vars)
-    #     sol_vec = pd.DataFrame(index = vars_value.apply(lambda x:x.VarName))
-    #     sol_vec['value'] = vars_value.apply(lambda x:x.X).values
-    #     optimal_routes_name_list = sol_vec.loc[sol_vec['value']>=0.98].index.to_list()
-    #     _cumulative_space = 0
-    #     for j in range(len(optimal_routes_name_list)):
-    #         _route_name = optimal_routes_name_list[j]
-    #         _cumulative_space+=self.getRemainingSpace(_route_name)
-    #     _avg_rem_space = _cumulative_space/self.model.ObjVal
-    #     return _avg_rem_space
-        
-    # def getRemainingSpace(self, _route_name):
-    #     '''Absolute remaining space for all mr'''
-    #     ref_df = self.init_routes_df.set_index('labels')
-    #     _col = ref_df.loc[:][_route_name]
-    #     _mr = _col['m']
-    #     node_seq = pd.Series(_col.iloc[self.customer_index][_col>=0.7].index)
-    #     _qr = sum([self.customer_demand[c] for c in node_seq])
-    #     _lr = _col['lr']
-    #     _abs_rem_space = (_mr*self.vehicle_capacity) - (_lr*_qr)
-    #     print(_route_name,', Rem. space=',_abs_rem_space,', mr=',_mr)
-    #     return _abs_rem_space
     
     def getWaiting4EachDemand(self, _col):
         _lr = _col.loc[['lr']]
