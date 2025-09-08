@@ -310,10 +310,14 @@ def SolveMinFleetWithTimeWindowNode(cTCCVRP_mt):
     _outflow_dict = dict(zip([x for x in range(_n+1)],[0]*(_n+1)))
     for arc in necess_link:
         i = int(arc[0].split("_")[-1].replace("O","0")); j = int(arc[1].split("_")[-1].replace("O","0"))
-#         incident_dict[i]+=1; incident_dict[j]+=1
-        if i!=0 and j!=0: _inflow_dict[j]+=1; _outflow_dict[i]+=1;
+        # incident_dict[i]+=1; incident_dict[j]+=1
+        # if i!=0 and j!=0: _inflow_dict[j]+=1; _outflow_dict[i]+=1;
+        _inflow_dict[j]+=1; _outflow_dict[i]+=1;
         if (_outflow_dict[i]>1 and i!=0) or (_inflow_dict[j]>1 and j!=0): 
             _bch_conflict = True; break;
+    
+
+
     print("necess_link",necess_link)
     print("_inflow_dict",_inflow_dict)
     print("_outflow_dict",_outflow_dict)

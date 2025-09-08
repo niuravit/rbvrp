@@ -16,7 +16,7 @@ from solver.bnb.MinimumFleetSizeWithTimeWindowBnP import get_route_patterns
 from typing import Dict, List, Any, Tuple, Optional
         
 class MinimumAverageTimeWithTimeWindowBnP(pybnb.Problem):
-    def __init__(self, _dist_mat, _initializer, _const_dict, _sol_dir, _chDom = True, _acc_flag = None, _dom_rule=None):
+    def __init__(self, _dist_mat, _initializer, _const_dict, _sol_dir, _chDom = True, _acc_flag = None, _dom_rule=None, time_limit=None):
         self.inst_dist_mat = _dist_mat
         self.initializer = _initializer
         self.constant_dict = _const_dict
@@ -24,6 +24,7 @@ class MinimumAverageTimeWithTimeWindowBnP(pybnb.Problem):
         self.lp_sol = None
         self.loc_bound = None
         self.name = "MAT_TW"
+        self.time_limit = time_limit  # Store time limit as instance variable
 
         self.is_root_node = True
         self.ch_dom = _chDom
@@ -130,7 +131,9 @@ class MinimumAverageTimeWithTimeWindowBnP(pybnb.Problem):
         
     def bound(self):
         # update bound from column generation
-        self.loc_bound, self.route_pats, self.lp_sol, self.rmp_model, self.rmp_init_df, self.node_count = SolveMinAverageTimeSpentNode(self)
+        current_solve_time = time.time() - self.solve_start_time
+        time_remain = self.time_limit - current_solve_time if self.time_limit is not None else float('inf')
+        self.loc_bound, self.route_pats, self.lp_sol, self.rmp_model, self.rmp_init_df, self.node_count = SolveMinAverageTimeSpentNode(self, time_remain)
         if (self.loc_bound-np.floor(self.loc_bound))>1e-6:
             new_lb = np.round(self.loc_bound,6)
         else: new_lb = np.floor(self.loc_bound)
@@ -144,7 +147,7 @@ class MinimumAverageTimeWithTimeWindowBnP(pybnb.Problem):
             branch_str = ", ".join(branch_conds) if branch_conds else "root"
             
             # Create a single line entry aligned with pybnb's table format
-            node_info = [f"Node {self.node_count}, relaxedLPObj {self.loc_bound}, Branching conditions: {branch_str}"]
+            node_info = [f"Node {self.node_count}, Global time remains: {time_remain}/{self.time_limit}, relaxedLPObj {self.loc_bound}, Branching conditions: {branch_str}"]
             self.custom_logger.log_branch(node_info)
 
         print("==Called bound(), Update LOCAL BOUND:", new_lb) 
@@ -287,6 +290,7 @@ class MinimumAverageTimeWithTimeWindowBnP(pybnb.Problem):
                             if (frac[1] in route_pat_nodes):
                             # Not having (0,j) but have some (i,j) i!=0
                                 r_del.append(indx) # penalize from 1 branch
+
                         elif (frac[1] == "O"):# and (frac[0] in route_pat_nodes)):
                             if (frac[0] in route_pat_nodes):  
                             # Not having (i,0) but have some (i,j) j!=0
@@ -308,7 +312,7 @@ class MinimumAverageTimeWithTimeWindowBnP(pybnb.Problem):
         print(f"Saving {self.solution_directory}/{fname}.lp")
         
         
-def SolveMinAverageTimeSpentNode(cTCCVRP_mt):
+def SolveMinAverageTimeSpentNode(cTCCVRP_mt, global_time_remain):
     # Instance 
     _n = cTCCVRP_mt.initializer.no_customer #no. node
     _dist_mat = cTCCVRP_mt.inst_dist_mat
@@ -337,8 +341,9 @@ def SolveMinAverageTimeSpentNode(cTCCVRP_mt):
     _outflow_dict = dict(zip([x for x in range(_n+1)],[0]*(_n+1)))
     for arc in necess_link:
         i = int(arc[0].split("_")[-1].replace("O","0")); j = int(arc[1].split("_")[-1].replace("O","0"))
-#         incident_dict[i]+=1; incident_dict[j]+=1
-        if i!=0 and j!=0: _inflow_dict[j]+=1; _outflow_dict[i]+=1;
+        # incident_dict[i]+=1; incident_dict[j]+=1
+        # if i!=0 and j!=0: _inflow_dict[j]+=1; _outflow_dict[i]+=1;
+        _inflow_dict[j]+=1; _outflow_dict[i]+=1;
         if (_outflow_dict[i]>1 and i!=0) or (_inflow_dict[j]>1 and j!=0): 
             _bch_conflict = True; break;
     print("necess_link",necess_link)
@@ -370,7 +375,8 @@ def SolveMinAverageTimeSpentNode(cTCCVRP_mt):
     t1 = time.time()
     _minAverageTimeLP_node.runColumnsGeneration(None,_pricing_status=False,
             _check_dominance=_chDom,_dominance_rule=_domRule ,_DP_ver="SIMUL_M",
-            _time_limit=_const_dict['dp_time_limit'],_filtering_mode="TopKRwdPerI",
+            _dp_time_limit=_const_dict['dp_time_limit'],_global_time_remain=global_time_remain,
+            _filtering_mode="TopKRwdPerI",
             _bch_cond = _b_cond_log,_node_count_lab = str(_node_count),
             _acc_flag =cTCCVRP_mt.acc_flag)
     colGen_te = time.time()-t1
