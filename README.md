@@ -24,12 +24,6 @@ The solver handles a **two-phase optimization**:
 - **Pricing Subproblem:** Resource-Constrained Shortest Path Problem (RCSPP) solved via Label-Setting Dynamic Programming with model-specific dominance rules
 - **BnB Framework:** [pybnb](https://github.com/ghackebeil/pybnb)
 
-### Key Contributions
-
-1. **Novel rate-based VRP** that jointly optimizes fleet size and route planning in a single framework for high-velocity last-mile delivery, extending prior rate-based shuttle network design to the local-hub-to-delivery-point tier.
-2. **Efficient column generation** with new state domination rules derived specifically for the rate-based objective, enabling close-to-optimal solutions by solving only the root node of the B&P tree.
-3. **Analytical properties:** proof that (under strict triangle inequality) a finite fleet size drives optimal routes to direct deliveries; and that, given fixed routes, additional vehicles can be assigned greedily to minimize demand-weighted lead time.
-
 ---
 
 ## Repository Structure
