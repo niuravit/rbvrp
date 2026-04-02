@@ -2,8 +2,8 @@ from data_model.Instance import Instance
 from solver.OptimizationModel import OptimizationModel
 from data_model.ExperimentConfig import ExperimentConfig
 # from Modules import initialize_path, bnp, pybnb, vis_sol
-from Modules.ignored_files.initialize_path import InitialRouteGenerator
-from Modules.ignored_files.visualize_sol import create_nodes,plot_network
+from Modules.initialize_path import InitialRouteGenerator
+from Modules.visualize_sol import create_nodes,plot_network
 from solver.bnb.MinimumFleetSizeWithTimeWindowBnP import *
 import pybnb
 

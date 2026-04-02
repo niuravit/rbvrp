@@ -11,7 +11,7 @@ from copy import deepcopy
 from math import ceil,floor
 epsilon = 1e-6
 import time
-import solver.model.avgTimeWithTimeWindowModel as md
+import Modules.solver.model.avgTimeWithTimeWindowModel as md
 from solver.bnb.MinimumFleetSizeWithTimeWindowBnP import get_route_patterns
 from typing import Dict, List, Any, Tuple, Optional
         

@@ -14,12 +14,12 @@ from math import ceil,floor
 from datetime import datetime
 epsilon = 1e-6
 import time
-import Modules.ignored_files.visualize_sol as vis_sol
-import Modules.ignored_files.initialize_path as init_path
-import Modules.ignored_files.random_instance as rand_inst
-import Modules.ignored_files.utility as util
+import Modules.visualize_sol as vis_sol
+import Modules.initialize_path as init_path
+import Modules.random_instance as rand_inst
+import Modules.utility as util
 # import model as md
-import solver.model.timeWindowModel as md
+import Modules.solver.model.timeWindowModel as md
 from typing import Dict, List, Any, Tuple, Optional
 
 
