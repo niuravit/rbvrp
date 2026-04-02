@@ -1,9 +1,9 @@
 import sys
 sys.path.insert(0,'/Users/ravitpichayavet/Documents/GaTechOR/GraduateResearch/CTC_CVRP/Modules')
-import visualize_sol as vis_sol
-import initialize_path as init_path
-import random_instance as rand_inst
-import utility as util
+import Modules.ignored_files.visualize_sol as vis_sol
+import Modules.ignored_files.initialize_path as init_path
+import Modules.ignored_files.random_instance as rand_inst
+import Modules.ignored_files.utility as util
 # import branch_and_price as bnp
 import pandas as pd
 import time
