@@ -131,44 +131,6 @@ Available experiment configs:
 
 ---
 
-## Running Multiple Jobs on HPC (SLURM / GT PACE)
-
-Use the script in `jobsubmission_scripts/rbvrp_jsub_cmd.sh` to submit batches of jobs to the SLURM scheduler.
-
-### Usage
-
-```bash
-bash jobsubmission_scripts/rbvrp_jsub_cmd.sh <JSCRIPTDIR> <JOB_LIST_CSV> <WORKING_DIR>
-```
-
-| Argument | Description |
-|----------|-------------|
-| `JSCRIPTDIR` | Subdirectory (relative to `WORKING_DIR`) where `.sbatch` files will be written |
-| `JOB_LIST_CSV` | CSV file listing job parameters (one row per job) |
-| `WORKING_DIR` | Absolute path to the repository root |
-
-### Job List CSV Format
-
-```
-job_name,account,jqueue,mail,node_nbr,core_per_node_nbr,mem_per_core,runtime_limit,instance_config,experiment_config,vis_config
-my_job,gt-account,inferno,user@gatech.edu,1,4,8,7200,instance_config_a12_1.json,experiment_config_2h.json,vis_config.json
-```
-
-- `runtime_limit` — in seconds; a 30-second buffer is automatically added
-- Each job runs `python run.py` inside `pybnb_workspace/` with the `rbvrpenv` conda environment
-- Submitted job IDs are recorded in `jobsubmission_scripts/sbatch_submission_records/submitted_batch_<timestamp>.csv`
-
-### Example
-
-```bash
-bash jobsubmission_scripts/rbvrp_jsub_cmd.sh \
-    jobsubmission_scripts \
-    job_list.csv \
-    /path/to/CTC_CVRP
-```
-
----
-
 ## Data Flow
 
 ```
